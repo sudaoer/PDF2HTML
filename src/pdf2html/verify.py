@@ -4,26 +4,18 @@ import re
 from pathlib import Path
 from typing import Any
 
-from bs4 import BeautifulSoup
-
 from .bundle_verify import BundleVerificationError, verify_bundle
 from .models import Document
-from .render import EQUATION_TAG_COMMAND, _parse_equation
-from .translations import load_translations
 from .util import atomic_write_json
 
-
-class VerificationError(RuntimeError):
-    """A generated paper failed deterministic verification."""
-
-
 SUBFIGURE_ONLY = re.compile(r"^\s*\([a-z]\)\s*$", re.IGNORECASE)
-TEX_CONTROL_SEQUENCE = re.compile(r"\\[A-Za-z]+")
 TEXT_KINDS = {"paragraph", "heading", "list", "aside", "page_footnote"}
 
 
 def structure_report(
-    document: Document, *, extra_errors: list[str] | None = None
+    document: Document,
+    *,
+    extra_errors: list[str] | None = None,
 ) -> dict[str, Any]:
     errors = list(extra_errors or [])
     warnings: list[str] = []
@@ -99,181 +91,9 @@ def write_structure_report(
     return report
 
 
-def verify_legacy_html(
-    document: Document,
-    translation_dir: Path,
-    html_path: Path,
-    report_path: Path,
-) -> dict[str, Any]:
-    translations = load_translations(document, translation_dir)
-    if not html_path.is_file():
-        raise VerificationError(f"Generated HTML is missing: {html_path}")
-    soup = BeautifulSoup(html_path.read_text(encoding="utf-8"), "html.parser")
-    structural = structure_report(document)
-    errors: list[str] = list(structural["errors"])
-    warnings: list[str] = list(structural["warnings"])
-    title = soup.find("title")
-    if title is None or not title.get_text(strip=True):
-        errors.append("The document has no HTML title.")
-    if soup.find("main") is None:
-        errors.append("The document has no main landmark.")
-    for marker in ("MATHPLACEHOLDER", "target: null", "TODO", "{{", "}}"):
-        if marker in str(soup):
-            errors.append(f"Unresolved marker remains in HTML: {marker}")
-    missing_images: list[str] = []
-    material_images = [image for image in soup.find_all("img") if image.get("src")]
-    for image in material_images:
-        source = str(image.get("src", ""))
-        if not source:
-            continue
-        if source.startswith(("http://", "https://", "//")):
-            errors.append(f"Remote image dependency is not allowed: {source}")
-            continue
-        candidate = (html_path.parent / source).resolve()
-        if not candidate.is_file():
-            missing_images.append(source)
-    if missing_images:
-        errors.append(f"Missing images: {missing_images[:5]}")
-    for script in soup.find_all("script", src=True):
-        source = str(script.get("src", ""))
-        if source.startswith(("http://", "https://", "//")):
-            errors.append(f"Remote script dependency is not allowed: {source}")
-        elif not (html_path.parent / source).resolve().is_file():
-            errors.append(f"Missing script: {source}")
-    for link in soup.find_all("link", rel="stylesheet"):
-        href = str(link.get("href", ""))
-        if href.startswith(("http://", "https://", "//")):
-            errors.append(f"Remote stylesheet dependency is not allowed: {href}")
-        elif not (html_path.parent / href).resolve().is_file():
-            errors.append(f"Missing stylesheet: {href}")
-    pair_count = len(soup.select(".pair"))
-    if pair_count == 0:
-        errors.append("The document contains no bilingual content pairs.")
-    fallback_math = len(soup.select(".math-fallback"))
-    if fallback_math:
-        errors.append(f"{fallback_math} formulas fell back to readable LaTeX text.")
-    raw_mathml_commands = [
-        node.get_text(" ", strip=True)
-        for node in soup.select("math mtext, math mi, math mo")
-        if TEX_CONTROL_SEQUENCE.search(node.get_text(" ", strip=True))
-    ]
-    if raw_mathml_commands:
-        errors.append(
-            "MathML contains unparsed TeX control sequences: "
-            f"{raw_mathml_commands[:3]}"
-        )
-    expected_equation_numbers = 0
-    for block in document.blocks:
-        if block.kind != "equation":
-            continue
-        equation = _parse_equation(block.source)
-        section = soup.find(id=block.id)
-        rendered_numbers = section.select(".equation-number") if section else []
-        if equation.invalid_tag:
-            errors.append(f"Equation {block.id} has a malformed or non-terminal \\tag command.")
-            continue
-        if equation.label is None:
-            if rendered_numbers:
-                errors.append(f"Unnumbered equation {block.id} rendered an equation number.")
-            continue
-        expected_equation_numbers += 1
-        if len(rendered_numbers) != 1:
-            errors.append(
-                f"Equation {block.id} expected one number, rendered {len(rendered_numbers)}."
-            )
-            continue
-        number = rendered_numbers[0]
-        layout = number.find_parent(class_="equation-layout")
-        expected_kind = "tag-star" if equation.starred else "tag"
-        if layout is None:
-            errors.append(f"Equation {block.id} number is outside its equation layout.")
-            continue
-        if str(layout.get("data-equation-label") or "") != equation.label:
-            errors.append(f"Equation {block.id} rendered the wrong equation label.")
-        if str(layout.get("data-equation-tag") or "") != expected_kind:
-            errors.append(f"Equation {block.id} rendered the wrong equation tag style.")
-        if number.find_parent("math") is not None:
-            errors.append(f"Equation {block.id} number remains inside MathML.")
-        formula = layout.select_one(".equation-scroll math")
-        if formula is None:
-            errors.append(f"Equation {block.id} has no numbered formula MathML.")
-        elif EQUATION_TAG_COMMAND.search(formula.get_text(" ", strip=True)):
-            errors.append(f"Equation {block.id} still contains a \\tag command in MathML.")
-    rendered_equation_numbers = len(soup.select(".paper-body .equation-number"))
-    if rendered_equation_numbers != expected_equation_numbers:
-        errors.append(
-            f"Expected {expected_equation_numbers} equation numbers, "
-            f"rendered {rendered_equation_numbers}."
-        )
-    expected_groups = sum(block.kind == "figure_group" for block in document.blocks)
-    rendered_groups = soup.select("figure.figure-group")
-    if len(rendered_groups) != expected_groups:
-        errors.append(
-            f"Expected {expected_groups} figure groups, rendered {len(rendered_groups)}."
-        )
-    for group in rendered_groups:
-        expected_members = int(str(group.get("data-members") or "0"))
-        if len(group.select(".figure-member img")) != expected_members:
-            errors.append(f"Figure group {group.get('id')} rendered the wrong image count.")
-    if soup.select(".paper-body .paper-front-notes"):
-        errors.append("Front-matter notes were rendered inside the paper body.")
-    if soup.select(".paper-body .paper-endnotes"):
-        errors.append("Endnotes were rendered inside the paper body.")
-    if soup.select(".paper-body .aside, .paper-body .page_footnote"):
-        errors.append("Footnote-like content was rendered through the body branch.")
-    for body_pair in soup.select(".paper-body > .text-pair"):
-        if not body_pair.get_text(strip=True):
-            errors.append(f"Empty body pair was rendered: {body_pair.get('id')}")
-    report: dict[str, Any] = {
-        "job_id": document.job_id,
-        "status": "failed" if errors else "passed",
-        "html": str(html_path.resolve()),
-        "blocks": len(document.blocks),
-        "segments": len(document.segments),
-        "translations": len(translations),
-        "bilingual_pairs": pair_count,
-        "images": len(material_images),
-        "math_fallbacks": fallback_math,
-        "equation_numbers": rendered_equation_numbers,
-        "figure_groups": expected_groups,
-        "front_matter_notes": len(document.front_matter_notes),
-        "endnotes": len(document.endnotes),
-        "warnings": warnings,
-        "errors": errors,
-    }
-    atomic_write_json(report_path, report)
-    if errors:
-        raise VerificationError("; ".join(errors))
-    return report
-
-
-def verify_output(
-    document: Document,
-    translation_dir: Path,
-    html_path: Path,
-    report_path: Path,
-    *,
-    bundle_path: Path | None = None,
-) -> dict[str, Any]:
-    bundle_report = verify_bundle(bundle_path) if bundle_path is not None else None
-    legacy_report = verify_legacy_html(
-        document,
-        translation_dir,
-        html_path,
-        report_path,
-    )
-    if bundle_report is not None:
-        legacy_report["bundle"] = bundle_report
-        atomic_write_json(report_path, legacy_report)
-    return legacy_report
-
-
 __all__ = [
     "BundleVerificationError",
-    "VerificationError",
     "structure_report",
     "verify_bundle",
-    "verify_legacy_html",
-    "verify_output",
     "write_structure_report",
 ]

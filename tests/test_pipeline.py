@@ -4,7 +4,6 @@ import json
 from pathlib import Path, PurePosixPath
 
 import pytest
-from bs4 import BeautifulSoup
 from fastapi.testclient import TestClient
 
 from pdf2html.bundle import BundleError, PaperBundle, build_bundle
@@ -23,8 +22,13 @@ from pdf2html.models import (
     TranslationFile,
     migrate_job_manifest,
 )
-from pdf2html.render import _parse_equation, build_paper, render_equation, render_markdown
-from pdf2html.search import SearchIndex, search_tokens
+from pdf2html.render import (
+    _parse_equation,
+    build_layout_preview,
+    render_equation,
+    render_markdown,
+)
+from pdf2html.search import SearchIndex, plain_text, search_tokens
 from pdf2html.server import create_app
 from pdf2html.translations import (
     TranslationError,
@@ -32,7 +36,7 @@ from pdf2html.translations import (
     reconcile_translation_artifacts,
 )
 from pdf2html.util import atomic_write_json, hash_file, hash_text, read_json, slugify
-from pdf2html.verify import VerificationError, structure_report, verify_output
+from pdf2html.verify import structure_report
 from pdf2html.zotero import ZoteroClient
 
 
@@ -123,36 +127,19 @@ def test_document_tasks_render_and_verify(tmp_path: Path) -> None:
     write_translation_tasks(document, task_dir, max_source_chars=80)
     fill_tasks(task_dir, translation_dir)
     translations = load_translations(document, translation_dir)
-    html_path = build_paper(
+    result = build_bundle(
         document,
         translations,
         content_list_path=content_path,
         library_root=tmp_path / "output" / "library",
     )
-    report = verify_output(
-        document,
-        translation_dir,
-        html_path,
-        tmp_path / "verification.json",
-    )
+    report = verify_bundle(result.bundle_path)
     assert report["status"] == "passed"
-    assert report["images"] == 1
-    assert report["equation_numbers"] == 1
-    assert (tmp_path / "output" / "library" / "index.html").is_file()
-    html = html_path.read_text(encoding="utf-8")
-    assert "https://cdn" not in html
-    assert "译文：Routing Networks" in html
-    html_path.write_text(
-        html.replace("</main>", '<code class="math-fallback">broken</code></main>'),
-        encoding="utf-8",
-    )
-    with pytest.raises(VerificationError, match="fell back"):
-        verify_output(
-            document,
-            translation_dir,
-            html_path,
-            tmp_path / "verification-with-fallback.json",
-        )
+    assert report["media"] == 1
+    assert not list((tmp_path / "output" / "library").rglob("*.html"))
+    assert "译文：Routing Networks" in (
+        result.paper_dir / "paper.zh-CN.md"
+    ).read_text(encoding="utf-8")
 
 
 def test_markdown_bundle_is_deterministic_and_self_contained(tmp_path: Path) -> None:
@@ -230,14 +217,46 @@ def test_bundle_rejects_media_path_traversal(tmp_path: Path) -> None:
         )
 
 
+def test_bundle_build_cleans_only_known_legacy_html(tmp_path: Path) -> None:
+    document, content_path = prepared_document(tmp_path)
+    translations = {segment.id: f"译文：{segment.source}" for segment in document.segments}
+    library_root = tmp_path / "library"
+    legacy_paper = library_root / "papers" / "old-paper"
+    legacy_assets = library_root / "assets"
+    legacy_paper.mkdir(parents=True)
+    legacy_assets.mkdir(parents=True)
+    (library_root / "index.html").write_text("legacy shelf", encoding="utf-8")
+    (legacy_paper / "index.html").write_text("legacy paper", encoding="utf-8")
+    (legacy_paper / "custom.html").write_text("user file", encoding="utf-8")
+    (legacy_assets / "app.css").write_text("legacy css", encoding="utf-8")
+    (legacy_assets / "app.js").write_text("legacy js", encoding="utf-8")
+    (legacy_assets / "keep.txt").write_text("keep", encoding="utf-8")
+
+    result = build_bundle(
+        document,
+        translations,
+        content_list_path=content_path,
+        library_root=library_root,
+    )
+
+    assert not (library_root / "index.html").exists()
+    assert not (legacy_paper / "index.html").exists()
+    assert not (legacy_assets / "app.css").exists()
+    assert not (legacy_assets / "app.js").exists()
+    assert (legacy_paper / "custom.html").read_text(encoding="utf-8") == "user file"
+    assert (legacy_assets / "keep.txt").is_file()
+    assert not list(result.paper_dir.glob("*.html"))
+
+
 def test_job_manifest_v1_migrates_to_bundle_fields() -> None:
     payload = {
         "schema_version": 1,
         "output_path": "output/library/papers/example/index.html",
     }
     migrated = migrate_job_manifest(payload)
-    assert migrated["schema_version"] == 3
-    assert migrated["legacy_html_path"] == payload["output_path"]
+    assert migrated["schema_version"] == 4
+    assert "output_path" not in migrated
+    assert "legacy_html_path" not in migrated
     assert migrated["bundle_path"] == ""
     assert migrated["bundle_revision"] == ""
 
@@ -405,76 +424,6 @@ def test_bilingual_fts_tokens_weights_pages_and_limits(tmp_path: Path) -> None:
     assert len(index.search("路由", 1)) == 1
 
 
-@pytest.mark.parametrize(
-    ("mutation", "error"),
-    [
-        ("missing", "expected one number"),
-        ("wrong", "wrong equation label"),
-        ("duplicate", "expected one number"),
-    ],
-)
-def test_verify_rejects_damaged_equation_numbers(
-    tmp_path: Path,
-    mutation: str,
-    error: str,
-) -> None:
-    document, content_path = prepared_document(tmp_path)
-    task_dir = tmp_path / "tasks"
-    translation_dir = tmp_path / "translations"
-    write_translation_tasks(document, task_dir)
-    fill_tasks(task_dir, translation_dir)
-    html_path = build_paper(
-        document,
-        load_translations(document, translation_dir),
-        content_list_path=content_path,
-        library_root=tmp_path / "output" / "library",
-    )
-    soup = BeautifulSoup(html_path.read_text(encoding="utf-8"), "html.parser")
-    number = soup.select_one(".equation-number")
-    layout = soup.select_one(".equation-layout")
-    assert number is not None
-    assert layout is not None
-    if mutation == "missing":
-        number.decompose()
-    elif mutation == "wrong":
-        layout["data-equation-label"] = "2"
-    else:
-        duplicate = BeautifulSoup(str(number), "html.parser").select_one(".equation-number")
-        assert duplicate is not None
-        number.insert_after(duplicate)
-    html_path.write_text(str(soup), encoding="utf-8")
-    with pytest.raises(VerificationError, match=error):
-        verify_output(
-            document,
-            translation_dir,
-            html_path,
-            tmp_path / f"verification-{mutation}.json",
-        )
-
-
-def test_verify_rejects_malformed_equation_tag(tmp_path: Path) -> None:
-    document, content_path = prepared_document(tmp_path)
-    equation = next(block for block in document.blocks if block.kind == "equation")
-    equation.source = r"E = mc^2\tag{1} trailing"
-    task_dir = tmp_path / "tasks"
-    translation_dir = tmp_path / "translations"
-    write_translation_tasks(document, task_dir)
-    fill_tasks(task_dir, translation_dir)
-    html_path = build_paper(
-        document,
-        load_translations(document, translation_dir),
-        content_list_path=content_path,
-        library_root=tmp_path / "output" / "library",
-    )
-    with pytest.raises(VerificationError, match="malformed or non-terminal"):
-        verify_output(
-            document,
-            translation_dir,
-            html_path,
-            tmp_path / "verification-malformed-tag.json",
-        )
-
-
 def test_translation_rejects_lost_protected_token(tmp_path: Path) -> None:
     document, _ = prepared_document(tmp_path)
     task_dir = tmp_path / "tasks"
@@ -516,27 +465,22 @@ def test_display_equation_number_is_rendered_outside_mathml(
     tag_kind: str,
     visible_label: str,
 ) -> None:
-    soup = BeautifulSoup(render_equation(source), "html.parser")
-    layout = soup.select_one(".equation-layout")
-    assert layout is not None
-    assert layout.get("data-equation-label") == label
-    assert layout.get("data-equation-tag") == tag_kind
-    number = layout.select_one(".equation-number")
-    formula = layout.select_one(".equation-scroll math")
-    assert number is not None
-    assert formula is not None
-    assert number.find_parent("math") is None
-    assert number.get_text("", strip=True) == visible_label
-    assert r"\tag" not in str(formula)
-    assert not layout.select(".math-fallback")
+    rendered = render_equation(source)
+    assert f'data-equation-label="{label}"' in rendered
+    assert f'data-equation-tag="{tag_kind}"' in rendered
+    assert '<div class="equation-scroll"><span class="math-display"><math' in rendered
+    formula, number = rendered.split('<span class="equation-number"', maxsplit=1)
+    assert r"\tag" not in formula
+    number_html = '<span class="equation-number"' + number
+    assert plain_text(number_html).replace(" ", "") == visible_label
+    assert "math-fallback" not in rendered
 
 
 def test_unnumbered_equation_keeps_the_existing_mathml_shape() -> None:
     rendered = render_equation(r"\[x = 1\]")
-    soup = BeautifulSoup(rendered, "html.parser")
-    assert soup.select_one(".math-display math") is not None
-    assert soup.select_one(".equation-layout") is None
-    assert soup.select_one(".equation-number") is None
+    assert '<span class="math-display"><math' in rendered
+    assert "equation-layout" not in rendered
+    assert "equation-number" not in rendered
 
 
 @pytest.mark.parametrize(
@@ -749,12 +693,10 @@ def test_column_and_page_continuations_merge_across_leading_floats(tmp_path: Pat
     assert len(merged.extra["origin_bboxes"]) == 3
     assert document.layout_info["automatic_paragraph_merges"] == 1
 
-    translations = {segment.id: segment.source for segment in document.segments}
-    html_path = build_paper(
+    html_path = build_layout_preview(
         document,
-        translations,
         content_list_path=path,
-        library_root=tmp_path / "output" / "library",
+        preview_root=tmp_path / "preview",
     )
     assert "PDF 1-2" in html_path.read_text(encoding="utf-8")
 
@@ -876,31 +818,18 @@ def test_composite_figure_and_page_notes_are_normalized(tmp_path: Path) -> None:
     report = structure_report(document)
     assert report["status"] == "passed"
     assert len(report["override_targets"]) == 4
-    task_dir = tmp_path / "translation_tasks"
-    translation_dir = tmp_path / "translations"
-    write_translation_tasks(document, task_dir)
-    fill_tasks(task_dir, translation_dir)
-    translations = load_translations(document, translation_dir)
-    html_path = build_paper(
+    html_path = build_layout_preview(
         document,
-        translations,
         content_list_path=path,
-        library_root=tmp_path / "output" / "library",
-    )
-    report = verify_output(
-        document,
-        translation_dir,
-        html_path,
-        tmp_path / "verification.json",
+        preview_root=tmp_path / "preview",
     )
     html = html_path.read_text(encoding="utf-8")
-    assert report["figure_groups"] == 1
     assert 'class="figure-group layout-row"' in html
     assert html.count('class="figure-member"') == 2
     assert html.index('class="paper-front-notes"') < html.index('class="paper-body"')
     assert html.index('class="paper-endnotes"') > html.index('class="paper-body"')
     assert "https://example.test/data\\#anchor" not in html
-    css = (tmp_path / "output" / "library" / "assets" / "app.css").read_text(
+    css = (tmp_path / "preview" / "assets" / "app.css").read_text(
         encoding="utf-8"
     )
     assert ".figure-members { grid-template-columns: minmax(0, 1fr) !important; }" in css
@@ -1090,16 +1019,15 @@ def test_override_group_is_bbox_ordered_and_renders_its_footnote(tmp_path: Path)
     translation_dir = tmp_path / "translations"
     write_translation_tasks(document, task_dir)
     fill_tasks(task_dir, translation_dir)
-    html_path = build_paper(
+    result = build_bundle(
         document,
         load_translations(document, translation_dir),
         content_list_path=content_path,
         library_root=tmp_path / "output" / "library",
     )
-    html = html_path.read_text(encoding="utf-8")
-    assert '<div class="figure-note pair">' in html
-    assert "Shared figure note." in html
-    assert "译文：Shared figure note." in html
+    chinese = (result.paper_dir / "paper.zh-CN.md").read_text(encoding="utf-8")
+    assert "Shared figure note." in chinese
+    assert "译文：Shared figure note." in chinese
 
 
 def test_translation_reconciliation_reuses_content_across_id_changes(

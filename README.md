@@ -6,8 +6,13 @@ PDF2HTML 是一个由 Codex 运行的本地工作流，用于把 Zotero 中的�
 
 ```powershell
 pixi install
+pnpm install --frozen-lockfile
+pnpm build
 pixi run pdf2html preflight
 ```
+
+Python 与 MinerU 依赖由 Pixi 管理；Vue 前端只使用 pnpm。仓库已提交可直接运行的
+Vue distribution，`pnpm build` 用于前端开发后刷新这些资源。
 
 预检（preflight）必须报告 Zotero API 版本 3、MinerU、Poppler、启用 CUDA 的 PyTorch 以及预期的 GPU。Zotero 必须处于运行状态，并启用 **设置（Settings）> 高级（Advanced）> 允许此计算机上的其他应用程序与 Zotero 通信（Allow other applications on this computer to communicate with Zotero）**。
 
@@ -76,7 +81,20 @@ pixi run pdf2html verify --job <job-id>
 pixi run pdf2html status --job <job-id>
 ```
 
-离线书架（offline shelf）写入 `output/library/index.html`。每篇论文位于 `output/library/papers/<paper-id>/` 下，且只使用相对路径的本地资源。
+`build` 只在 `output/library/papers/<paper-id>/` 写入可重复生成的 Markdown
+bundle：`paper.en.md`、`paper.zh-CN.md`、自包含的 `paper.json` 和内容寻址的
+`media/`。它不会在 `output/library` 生成 HTML。
+
+启动只读本地书架：
+
+```powershell
+pixi run pdf2html serve --port 8765
+```
+
+服务固定监听 `127.0.0.1`。打开 `http://127.0.0.1:8765/` 即可使用 Vue
+书架、双语阅读器和中英文全文搜索。Markdown、sidecar 和媒体也可通过每篇论文的
+`/papers/<paper-id>/` 路由读取；服务只允许 `paper.json` 与 Vite manifest 中列出的
+文件，不提供任意文件系统访问。
 
 ## 质量检查
 
@@ -84,6 +102,14 @@ pixi run pdf2html status --job <job-id>
 pixi run lint
 pixi run typecheck
 pixi run test
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
 ```
 
-确定性校验（deterministic verification）会检查翻译完整性、受保护标记（protected tokens）、缺失媒体、未解析的模板标记（template markers）、远程运行时依赖，以及空正文、孤立子图标题、正文页注和损坏的组合图。任何失效的 override 都会阻止布局锁定。此外，Codex 会将渲染出的 PDF 页面与生成的阅读器进行对比，并在交付前分别以桌面端和移动端宽度检查站点。
+确定性校验会直接检查 bundle schema、canonical revision、Document/译文重建、
+Markdown AST、受保护 token、公式、块/段落标记、图形组、媒体哈希和路径安全，
+并通过应用内 HTTP 请求验证 shelf、Markdown、JSON、media、assets、全文搜索与
+ETag/304。任何失效的 override 都会阻止布局锁定。此外，Codex 会将源 PDF 页面与
+Vue 阅读器进行对比，并在交付前分别以桌面端和移动端宽度检查站点。

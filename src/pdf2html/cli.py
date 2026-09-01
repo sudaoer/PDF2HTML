@@ -28,7 +28,7 @@ from .models import (
     SourceReference,
     migrate_job_manifest,
 )
-from .render import build_layout_preview, build_paper
+from .render import build_layout_preview
 from .server import ServerError, create_app, verify_http_app
 from .translations import (
     TranslationError,
@@ -44,13 +44,7 @@ from .util import (
     slugify,
     utc_now,
 )
-from .verify import (
-    BundleVerificationError,
-    VerificationError,
-    structure_report,
-    verify_output,
-    write_structure_report,
-)
+from .verify import BundleVerificationError, structure_report, verify_bundle, write_structure_report
 from .zotero import Library, SelectedPaper, ZoteroClient, ZoteroError
 
 app = typer.Typer(
@@ -82,7 +76,7 @@ def _load_manifest(job_id: str) -> JobManifest:
 
 
 def _save_manifest(manifest: JobManifest) -> None:
-    manifest.schema_version = 3
+    manifest.schema_version = 4
     manifest.updated_at = utc_now()
     atomic_write_json(_manifest_path(manifest.job_id), manifest.model_dump(mode="json"))
 
@@ -260,6 +254,12 @@ def preflight() -> None:
         "python": sys.version.split()[0],
         "mineru": mineru_version(),
     }
+    frontend_root = Path(__file__).parent / "web" / "dist"
+    details["vue_assets"] = str(frontend_root)
+    if not (frontend_root / "index.html").is_file() or not (
+        frontend_root / ".vite" / "manifest.json"
+    ).is_file():
+        failures.append("Vue distribution assets are missing; run `pnpm build`.")
     try:
         with ZoteroClient() as client:
             details["zotero"] = client.preflight()
@@ -497,7 +497,7 @@ def finalize_layout_command(
 def build_command(
     job: Annotated[str, typer.Option("--job", help="Prepared job ID")],
 ) -> None:
-    """Validate Codex translations and build the paper plus shelf."""
+    """Validate Codex translations and build a deterministic Markdown bundle."""
     try:
         manifest = _load_manifest(job)
         if manifest.status not in {"awaiting_translation", "built", "verified"}:
@@ -512,21 +512,12 @@ def build_command(
             content_list_path=content_list_path,
             library_root=_root() / "output" / "library",
         )
-        html_path = build_paper(
-            document,
-            translations,
-            content_list_path=content_list_path,
-            library_root=_root() / "output" / "library",
-        )
-        manifest.output_path = relative_to(html_path, _root())
-        manifest.legacy_html_path = manifest.output_path
         manifest.bundle_path = relative_to(bundle.bundle_path, _root())
         manifest.bundle_revision = bundle.revision
         manifest.status = "built"
         manifest.error = ""
         _save_manifest(manifest)
         typer.echo(f"Built bundle {bundle.bundle_path} ({bundle.revision})")
-        typer.echo(f"Built legacy HTML {html_path}")
     except (BundleError, ValidationError, TranslationError, OSError, ValueError) as exc:
         typer.echo(f"ERROR: {exc}", err=True)
         raise typer.Exit(1) from exc
@@ -536,32 +527,31 @@ def build_command(
 def verify(
     job: Annotated[str, typer.Option("--job", help="Built job ID")],
 ) -> None:
-    """Run deterministic offline and translation checks for a built paper."""
+    """Verify the Markdown bundle and its read-only HTTP routes."""
     try:
         manifest = _load_manifest(job)
         if manifest.status not in {"built", "verified"}:
             raise ValueError("Build the finalized paper before verification.")
-        document = _load_finalized_document(manifest)
-        report = verify_output(
-            document,
-            _root() / manifest.translation_dir,
-            _root() / manifest.output_path,
-            _job_dir(job) / "verification.json",
-            bundle_path=_root() / manifest.bundle_path,
-        )
-        report["http"] = verify_http_app(
+        bundle_report = verify_bundle(_root() / manifest.bundle_path)
+        http_report = verify_http_app(
             library_root=_root() / "output" / "library",
             paper_id=(_root() / manifest.bundle_path).parent.name,
         )
-        atomic_write_json(_job_dir(job) / "verification.json", report)
+        report = {
+            "job_id": manifest.job_id,
+            "status": "passed",
+            "bundle": bundle_report,
+            "http": http_report,
+        }
+        report_path = _job_dir(job) / "verification.json"
+        atomic_write_json(report_path, report)
+        manifest.verification_report_path = relative_to(report_path, _root())
         manifest.status = "verified"
         _save_manifest(manifest)
         typer.echo(json.dumps(report, ensure_ascii=False, indent=2))
     except (
         BundleVerificationError,
         ValidationError,
-        TranslationError,
-        VerificationError,
         OSError,
         ServerError,
         ValueError,
@@ -610,7 +600,11 @@ def status(
                 "status": manifest.status,
                 "title": manifest.metadata.title,
                 "updated_at": manifest.updated_at,
-                "output": manifest.output_path,
+                "bundle": manifest.bundle_path,
+                "bundle_revision": manifest.bundle_revision,
+                "url": f"/papers/{Path(manifest.bundle_path).parent.name}/"
+                if manifest.bundle_path
+                else "",
                 "error": manifest.error,
             }
         )

@@ -36,7 +36,7 @@ class MinerURecord(BaseModel):
 
 
 class JobManifest(BaseModel):
-    schema_version: int = 3
+    schema_version: int = 4
     job_id: str
     created_at: str
     updated_at: str
@@ -55,10 +55,9 @@ class JobManifest(BaseModel):
     translation_task_dir: str = ""
     translation_dir: str = ""
     translation_reuse_report: str = ""
-    output_path: str = ""
     bundle_path: str = ""
     bundle_revision: str = ""
-    legacy_html_path: str = ""
+    verification_report_path: str = ""
     warnings: list[str] = Field(default_factory=list)
     error: str = ""
 
@@ -68,13 +67,15 @@ def migrate_job_manifest(payload: Any) -> dict[str, Any]:
         raise ValueError("Job manifest must be a JSON object.")
     migrated = dict(payload)
     version = int(migrated.get("schema_version", 1))
-    if version > 3:
+    if version > 4:
         raise ValueError(f"Unsupported job manifest schema: {version}")
     if version < 3:
-        migrated.setdefault("legacy_html_path", str(migrated.get("output_path", "")))
         migrated.setdefault("bundle_path", "")
         migrated.setdefault("bundle_revision", "")
-        migrated["schema_version"] = 3
+    migrated.pop("output_path", None)
+    migrated.pop("legacy_html_path", None)
+    migrated.setdefault("verification_report_path", "")
+    migrated["schema_version"] = 4
     return migrated
 
 

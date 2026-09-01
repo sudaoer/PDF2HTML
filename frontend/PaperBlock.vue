@@ -114,6 +114,13 @@ const media = (asset: string) => {
       <div class="target table-scroll" lang="zh-CN" v-html="renderRich(target, true)" />
       <div class="source table-scroll" lang="en" v-html="renderRich(block.source, true)" />
     </div>
+    <img
+      v-if="block.asset"
+      class="table-fallback"
+      :src="media(block.asset)"
+      :alt="`原始表格，第 ${block.page + 1} 页`"
+      loading="lazy"
+    >
     <span class="page-marker">{{ pages }}</span>
   </section>
 

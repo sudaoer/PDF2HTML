@@ -11,9 +11,8 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from latex2mathml.converter import convert as latex_to_mathml
 from markdown_it import MarkdownIt
 
-from .bundle import bundle_shelf_record
 from .models import Document
-from .util import atomic_write_text, hash_file, read_json, slugify
+from .util import atomic_write_text, hash_file
 
 MATH_PATTERN = re.compile(
     r"(\$\$(?P<dollar_display>.*?)\$\$|\\\[(?P<bracket_display>.*?)\\\]|"
@@ -146,13 +145,9 @@ def _normalize_latex_for_mathml(value: str) -> str:
                 inner, group_end = group
                 payload = _legacy_em_payload(inner)
                 if payload is not None:
-                    normalized.append(
-                        rf"\boldsymbol{{{_normalize_latex_for_mathml(payload)}}}"
-                    )
+                    normalized.append(rf"\boldsymbol{{{_normalize_latex_for_mathml(payload)}}}")
                 else:
-                    normalized.append(
-                        rf"\textbf{{{_normalize_latex_for_mathml(inner)}}}"
-                    )
+                    normalized.append(rf"\textbf{{{_normalize_latex_for_mathml(inner)}}}")
                 index = group_end + 1
                 continue
         if value[index] == "{":
@@ -291,30 +286,6 @@ def _templates() -> Environment:
     )
 
 
-def build_paper(
-    document: Document,
-    translations: dict[str, str],
-    *,
-    content_list_path: Path,
-    library_root: Path,
-) -> Path:
-    title_slug = slugify(document.metadata.title)
-    paper_id = f"{title_slug}-{document.source.item_key.lower()}"
-    paper_dir = library_root / "papers" / paper_id
-    paper_dir.mkdir(parents=True, exist_ok=True)
-    html_path = _build_paper_page(
-        document,
-        translations,
-        content_list_path=content_list_path,
-        paper_dir=paper_dir,
-        asset_prefix="../../assets",
-        preview=False,
-    )
-    _write_shared_assets(library_root)
-    build_shelf(library_root)
-    return html_path
-
-
 def build_layout_preview(
     document: Document,
     *,
@@ -349,11 +320,7 @@ def _build_paper_page(
     media_dir = paper_dir / "media"
     blocks: list[dict[str, Any]] = []
     toc: list[dict[str, Any]] = []
-    endnote_links = {
-        (note.page, note.marker): note.id
-        for note in document.endnotes
-        if note.marker
-    }
+    endnote_links = {(note.page, note.marker): note.id for note in document.endnotes if note.marker}
     stream_blocks = document.blocks
     if document.metadata.abstract:
         introduction_index = next(
@@ -425,9 +392,7 @@ def _build_paper_page(
         page_start = min(origin_pages) + 1
         page_end = max(origin_pages) + 1
         page_label = (
-            f"PDF {page_start}"
-            if page_start == page_end
-            else f"PDF {page_start}-{page_end}"
+            f"PDF {page_start}" if page_start == page_end else f"PDF {page_start}-{page_end}"
         )
         rendered = {
             "id": block.id,
@@ -459,9 +424,7 @@ def _build_paper_page(
     for note in document.front_matter_notes:
         source_html = render_inline(note.source)
         target_html = (
-            render_inline(translations.get(note.segment_id, ""))
-            if note.segment_id
-            else source_html
+            render_inline(translations.get(note.segment_id, "")) if note.segment_id else source_html
         )
         front_notes.append(
             {
@@ -518,29 +481,3 @@ def _build_paper_page(
     )
     atomic_write_text(paper_dir / "index.html", output)
     return paper_dir / "index.html"
-
-
-def _write_shared_assets(library_root: Path) -> None:
-    web_root = Path(__file__).parent / "web"
-    assets = library_root / "assets"
-    assets.mkdir(parents=True, exist_ok=True)
-    for name in ("app.css", "app.js"):
-        atomic_write_text(assets / name, (web_root / name).read_text(encoding="utf-8"))
-
-
-def build_shelf(library_root: Path) -> Path:
-    papers: list[dict[str, Any]] = []
-    papers_root = library_root / "papers"
-    if papers_root.exists():
-        for manifest_path in sorted(papers_root.glob("*/paper.json")):
-            raw = read_json(manifest_path)
-            if isinstance(raw, dict):
-                papers.append(bundle_shelf_record(raw))
-    papers.sort(
-        key=lambda item: (str(item.get("date", "")), str(item.get("title", ""))),
-        reverse=True,
-    )
-    output = _templates().get_template("shelf.html.j2").render(papers=papers)
-    path = library_root / "index.html"
-    atomic_write_text(path, output)
-    return path

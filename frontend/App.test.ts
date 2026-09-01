@@ -106,6 +106,7 @@ describe("application routes", () => {
     const wrapper = mount(App);
     await flushPromises();
     expect(wrapper.text()).toContain("中文正文");
+    expect(document.title).toContain("中文标题 · English title");
     const chinese = wrapper.findAll("button").find((button) => button.text() === "中文");
     await chinese?.trigger("click");
     expect(wrapper.find(".paper-page").classes()).toContain("mode-target");

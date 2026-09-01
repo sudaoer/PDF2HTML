@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import html
-import mimetypes
 import re
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -427,12 +426,42 @@ def build_bundle(
         bundle_path,
         canonical_json_bytes(bundle.model_dump(mode="json"), indent=2),
     )
+    cleanup_legacy_library(library_root)
     return BundleBuildResult(
         paper_dir=paper_dir,
         bundle_path=bundle_path,
         paper_id=paper_id,
         revision=revision,
     )
+
+
+def cleanup_legacy_library(library_root: Path) -> list[Path]:
+    root = library_root.resolve()
+    candidates = [
+        root / "index.html",
+        root / "assets" / "app.css",
+        root / "assets" / "app.js",
+    ]
+    papers_root = root / "papers"
+    if papers_root.is_dir() and not papers_root.is_symlink():
+        candidates.extend(
+            paper_dir / "index.html"
+            for paper_dir in papers_root.iterdir()
+            if paper_dir.is_dir() and not paper_dir.is_symlink()
+        )
+    removed: list[Path] = []
+    for candidate in candidates:
+        try:
+            candidate.resolve().relative_to(root)
+        except ValueError as exc:
+            raise BundleError(f"Refusing to clean a legacy path outside {root}.") from exc
+        if candidate.is_file() or candidate.is_symlink():
+            candidate.unlink()
+            removed.append(candidate)
+    assets = root / "assets"
+    if assets.is_dir() and not any(assets.iterdir()):
+        assets.rmdir()
+    return removed
 
 
 def bundle_shelf_record(payload: dict[str, Any]) -> dict[str, Any]:
@@ -452,9 +481,5 @@ def bundle_shelf_record(payload: dict[str, Any]) -> dict[str, Any]:
         "publication": metadata.publication,
         "doi": metadata.doi,
         "tags": metadata.tags,
-        "href": f"papers/{bundle.paper_id}/index.html",
+        "href": f"/papers/{bundle.paper_id}/",
     }
-
-
-def media_type_for(path: str) -> str:
-    return mimetypes.guess_type(path)[0] or "application/octet-stream"

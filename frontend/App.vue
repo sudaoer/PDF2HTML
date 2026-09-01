@@ -75,8 +75,15 @@ async function load(): Promise<void> {
   loading.value = true;
   error.value = "";
   try {
-    if (paperId) bundle.value = await fetchJson<PaperBundle>(`/papers/${paperId}/paper.json`);
-    else shelf.value = await fetchJson<ShelfResponse>("/api/shelf");
+    if (paperId) {
+      bundle.value = await fetchJson<PaperBundle>(`/papers/${paperId}/paper.json`);
+      const sourceTitle = bundle.value.document.metadata.title;
+      const targetTitle = bundle.value.translations.find((item) => item.id === "meta.title")?.target;
+      document.title = targetTitle ? `${targetTitle} · ${sourceTitle}` : sourceTitle;
+    } else {
+      shelf.value = await fetchJson<ShelfResponse>("/api/shelf");
+      document.title = "双语论文书架";
+    }
   } catch (reason) {
     error.value = reason instanceof Error ? reason.message : String(reason);
   } finally {
