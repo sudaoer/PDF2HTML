@@ -4,13 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <title>{{ title_zh }} · {{ document.metadata.title }}</title>
-  <link rel="stylesheet" href="../../assets/app.css">
-  <script defer src="../../assets/app.js"></script>
+  <title>{% if title_zh %}{{ title_zh }} · {% endif %}{{ document.metadata.title }}</title>
+  <link rel="stylesheet" href="{{ asset_prefix }}/app.css">
+  <script defer src="{{ asset_prefix }}/app.js"></script>
 </head>
-<body class="paper-page mode-bilingual">
+<body class="paper-page {{ 'mode-source layout-preview' if preview else 'mode-bilingual' }}">
   <header class="reader-bar">
-    <a class="shelf-link" href="../../index.html" aria-label="返回论文书架">← 书架</a>
+    <a class="shelf-link" href="{{ '#' if preview else '../../index.html' }}" aria-label="返回论文书架">{{ '版面预览' if preview else '← 书架' }}</a>
     <div class="reader-controls" role="group" aria-label="阅读设置">
       <button type="button" data-mode="bilingual" aria-pressed="true">双语</button>
       <button type="button" data-mode="target" aria-pressed="false">中文</button>
@@ -39,14 +39,28 @@
       <article>
         <header class="paper-hero">
           <p class="eyebrow">Bilingual paper · 双语论文</p>
+          {% if preview %}
+          <h1 lang="en">{{ document.metadata.title }}</h1>
+          {% else %}
           <h1 lang="zh-CN">{{ title_zh }}</h1>
           <p class="original-title" lang="en">{{ document.metadata.title }}</p>
+          {% endif %}
           <p class="byline">{{ document.metadata.creators | join(', ') }}</p>
           <dl class="paper-meta">
             {% if document.metadata.publication %}<div><dt>来源</dt><dd>{{ document.metadata.publication }}</dd></div>{% endif %}
             {% if document.metadata.date %}<div><dt>日期</dt><dd>{{ document.metadata.date }}</dd></div>{% endif %}
             {% if document.metadata.doi %}<div><dt>DOI</dt><dd><a href="https://doi.org/{{ document.metadata.doi }}">{{ document.metadata.doi }}</a></dd></div>{% endif %}
           </dl>
+          {% if front_notes %}
+          <section class="paper-front-notes" aria-label="作者与版权注释">
+          {% for note in front_notes %}
+            <div class="front-note pair {{ note.kind }}" id="{{ note.id }}">
+              <div class="target" lang="zh-CN">{% if note.marker %}<sup>{{ note.marker }}</sup>{% endif %}{{ note.target_html | safe }}</div>
+              <div class="source" lang="en">{% if note.marker %}<sup>{{ note.marker }}</sup>{% endif %}{{ note.source_html | safe }}</div>
+            </div>
+          {% endfor %}
+          </section>
+          {% endif %}
         </header>
 
         {% if document.metadata.abstract %}
@@ -63,6 +77,28 @@
             <div class="target" lang="zh-CN"><h{{ block.level }}>{{ block.target_html | safe }}</h{{ block.level }}></div>
             <div class="source" lang="en"><h{{ block.level }}>{{ block.source_html | safe }}</h{{ block.level }}></div>
           </section>
+          {% elif block.kind == 'figure_group' %}
+          <figure class="figure-group layout-{{ block.layout }}" id="{{ block.id }}" data-page="{{ block.page }}" data-members="{{ block.members | length }}" style="--figure-columns: {{ block.members | length }}">
+            <div class="figure-members">
+            {% for member in block.members %}
+              <div class="figure-member" data-block-id="{{ member.id }}">
+                <button class="figure-open" type="button" aria-label="放大子图 {{ member.label }}"><img src="{{ member.asset }}" alt="论文子图 {{ member.label }}，第 {{ block.page }} 页" loading="lazy"></button>
+                <span class="subfigure-label" lang="en">{{ member.label }}</span>
+              </div>
+            {% endfor %}
+            </div>
+            <figcaption class="pair">
+              <div class="target" lang="zh-CN">{{ block.caption_target_html | safe }}</div>
+              <div class="source" lang="en">{{ block.caption_source_html | safe }}</div>
+            </figcaption>
+            {% if block.footnote_source_html or block.footnote_target_html %}
+            <div class="figure-note pair">
+              <div class="target" lang="zh-CN">{{ block.footnote_target_html | safe }}</div>
+              <div class="source" lang="en">{{ block.footnote_source_html | safe }}</div>
+            </div>
+            {% endif %}
+            <span class="page-marker">PDF {{ block.page }}</span>
+          </figure>
           {% elif block.kind == 'figure' %}
           <figure id="{{ block.id }}" data-page="{{ block.page }}">
             {% if block.asset %}<button class="figure-open" type="button" aria-label="放大图片"><img src="{{ block.asset }}" alt="论文图，第 {{ block.page }} 页" loading="lazy"></button>{% endif %}
@@ -109,6 +145,19 @@
           {% endif %}
         {% endfor %}
         </section>
+
+        {% if endnotes %}
+        <section class="paper-endnotes" aria-labelledby="endnotes-title">
+          <h2 id="endnotes-title">注释 <span lang="en">Notes</span></h2>
+          {% for note in endnotes %}
+          <div class="endnote pair" id="{{ note.id }}" data-page="{{ note.page }}">
+            <div class="target" lang="zh-CN"><sup>{{ note.marker }}</sup>{{ note.target_html | safe }}</div>
+            <div class="source" lang="en"><sup>{{ note.marker }}</sup>{{ note.source_html | safe }}</div>
+            {% if note.reference_id %}<a class="endnote-page" href="#{{ note.reference_id }}">↩ PDF {{ note.page }}</a>{% else %}<span class="endnote-page">PDF {{ note.page }}</span>{% endif %}
+          </div>
+          {% endfor %}
+        </section>
+        {% endif %}
       </article>
     </main>
   </div>

@@ -20,16 +20,26 @@ verified.
 1. Run `pixi run pdf2html preflight`.
 2. Run one selector, for example
    `pixi run pdf2html prepare --item "Exact paper title"`.
-3. Read every JSON file under the reported `translation_tasks` directory.
-4. Create corresponding files under `translations/`, preserving every segment
+3. Compare the source PDF, MinerU blocks, `layout_report.json`, and the reported
+   source-only layout preview at desktop and mobile widths. Do not edit preview
+   or final HTML.
+4. If deterministic normalization is insufficient, create
+   `layout_overrides.json` using only validated `group`, `move`, `reclassify`,
+   and `drop` operations, then run `pixi run pdf2html layout --job <job-id>` and
+   review the refreshed preview. Never weaken or bypass stale hash, page, bbox,
+   or block fingerprint checks.
+5. Run `pixi run pdf2html finalize-layout --job <job-id>` only after visual
+   review. This locks the reviewed layout and creates translation tasks.
+6. Read every JSON file under the reported `translation_tasks` directory.
+7. Create or complete corresponding files under `translations`, preserving every segment
    ID and `source_hash`, and replace each `target: null` with a faithful
-   Simplified Chinese translation.
-5. Do not translate formulas, code, URLs, citation markers, or bibliography
+   Simplified Chinese translation. Keep prefilled reused targets unchanged.
+8. Do not translate formulas, code, URLs, citation markers, or bibliography
    entries. Preserve protected tokens exactly. Use consistent terminology and
    include the English term in parentheses on its first material occurrence.
-6. Run `pixi run pdf2html build --job <job-id>` and then
+9. Run `pixi run pdf2html build --job <job-id>` and then
    `pixi run pdf2html verify --job <job-id>`.
-7. Render representative PDF pages and inspect the final page at desktop and
+10. Render representative PDF pages and inspect the final page at desktop and
    mobile widths. Fix defects before reporting completion.
 
 For a collection or tag, finish papers sequentially. A failure in one paper

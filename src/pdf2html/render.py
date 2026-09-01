@@ -75,6 +75,25 @@ def render_inline(value: str) -> str:
     return rendered
 
 
+def _link_endnote_markers(
+    rendered: str,
+    *,
+    page: int,
+    endnote_links: dict[tuple[int, str], str],
+) -> str:
+    result = rendered
+    for (note_page, marker), note_id in endnote_links.items():
+        if note_page != page:
+            continue
+        original = f"<sup>{marker}</sup>"
+        linked = (
+            f'<sup><a class="endnote-ref" href="#{note_id}" '
+            f'aria-label="注释 {html.escape(marker)}">{html.escape(marker)}</a></sup>'
+        )
+        result = result.replace(original, linked)
+    return result
+
+
 def render_equation(value: str) -> str:
     stripped = value.strip()
     for opening, closing in (("$$", "$$"), ("\\[", "\\]"), ("\\(", "\\)")):
@@ -124,10 +143,74 @@ def build_paper(
     title_slug = slugify(document.metadata.title)
     paper_id = f"{title_slug}-{document.source.item_key.lower()}"
     paper_dir = library_root / "papers" / paper_id
-    media_dir = paper_dir / "media"
     paper_dir.mkdir(parents=True, exist_ok=True)
+    html_path = _build_paper_page(
+        document,
+        translations,
+        content_list_path=content_list_path,
+        paper_dir=paper_dir,
+        asset_prefix="../../assets",
+        preview=False,
+    )
+    metadata_title_zh = translations["meta.title"]
+    paper_manifest = {
+        "paper_id": paper_id,
+        "job_id": document.job_id,
+        "item_key": document.source.item_key,
+        "title": document.metadata.title,
+        "title_zh": metadata_title_zh,
+        "creators": document.metadata.creators,
+        "date": document.metadata.date,
+        "publication": document.metadata.publication,
+        "doi": document.metadata.doi,
+        "tags": document.metadata.tags,
+        "href": f"papers/{paper_id}/index.html",
+    }
+    atomic_write_json(paper_dir / "paper.json", paper_manifest)
+    _write_shared_assets(library_root)
+    build_shelf(library_root)
+    return html_path
+
+
+def build_layout_preview(
+    document: Document,
+    *,
+    content_list_path: Path,
+    preview_root: Path,
+) -> Path:
+    preview_root.mkdir(parents=True, exist_ok=True)
+    assets = preview_root / "assets"
+    assets.mkdir(parents=True, exist_ok=True)
+    web_root = Path(__file__).parent / "web"
+    for name in ("app.css", "app.js"):
+        atomic_write_text(assets / name, (web_root / name).read_text(encoding="utf-8"))
+    return _build_paper_page(
+        document,
+        {},
+        content_list_path=content_list_path,
+        paper_dir=preview_root,
+        asset_prefix="assets",
+        preview=True,
+    )
+
+
+def _build_paper_page(
+    document: Document,
+    translations: dict[str, str],
+    *,
+    content_list_path: Path,
+    paper_dir: Path,
+    asset_prefix: str,
+    preview: bool,
+) -> Path:
+    media_dir = paper_dir / "media"
     blocks: list[dict[str, Any]] = []
     toc: list[dict[str, Any]] = []
+    endnote_links = {
+        (note.page, note.marker): note.id
+        for note in document.endnotes
+        if note.marker
+    }
     stream_blocks = document.blocks
     if document.metadata.abstract:
         introduction_index = next(
@@ -158,22 +241,38 @@ def build_paper(
         elif block.kind == "code":
             source_html = f"<pre><code>{html.escape(block.source)}</code></pre>"
         elif block.source:
-            source_html = render_markdown(block.source)
+            source_html = _link_endnote_markers(
+                render_markdown(block.source),
+                page=block.page,
+                endnote_links=endnote_links,
+            )
         if block.segment_id:
-            target_html = render_markdown(translations[block.segment_id])
+            target_html = _link_endnote_markers(
+                render_markdown(translations.get(block.segment_id, "")),
+                page=block.page,
+                endnote_links=endnote_links,
+            )
         if block.kind == "heading":
             source_html = render_inline(block.source)
-            target_html = render_inline(translations[block.segment_id])
+            target_html = render_inline(translations.get(block.segment_id, ""))
         caption_target = (
-            render_markdown(translations[block.caption_segment_id])
+            render_markdown(translations.get(block.caption_segment_id, ""))
             if block.caption_segment_id
             else ""
         )
         footnote_target = (
-            render_markdown(translations[block.footnote_segment_id])
+            render_markdown(translations.get(block.footnote_segment_id, ""))
             if block.footnote_segment_id
             else ""
         )
+        members = [
+            {
+                "id": member.id,
+                "asset": _copy_asset(member.asset, content_list_path.parent, media_dir),
+                "label": member.label,
+            }
+            for member in block.members
+        ]
         rendered = {
             "id": block.id,
             "kind": block.kind,
@@ -182,6 +281,8 @@ def build_paper(
             "source_html": source_html,
             "target_html": target_html,
             "asset": _copy_asset(block.asset, content_list_path.parent, media_dir),
+            "members": members,
+            "layout": block.layout,
             "caption_source_html": render_markdown(block.caption_source),
             "caption_target_html": caption_target,
             "footnote_source_html": render_markdown(block.footnote_source),
@@ -197,7 +298,53 @@ def build_paper(
                     "target": translations.get(block.segment_id, ""),
                 }
             )
-    metadata_title_zh = translations["meta.title"]
+    front_notes = []
+    for note in document.front_matter_notes:
+        source_html = render_inline(note.source)
+        target_html = (
+            render_inline(translations.get(note.segment_id, ""))
+            if note.segment_id
+            else source_html
+        )
+        front_notes.append(
+            {
+                "id": note.id,
+                "kind": note.kind,
+                "marker": note.marker,
+                "source_html": source_html,
+                "target_html": target_html,
+            }
+        )
+    endnotes = []
+    for note in document.endnotes:
+        reference_marker = f"<sup>{note.marker}</sup>"
+        reference_id = next(
+            (
+                block.id
+                for block in document.blocks
+                if block.page == note.page and reference_marker in block.source
+            ),
+            "",
+        )
+        if note.url:
+            escaped_url = html.escape(note.url, quote=True)
+            escaped_text = html.escape(note.url)
+            source_html = f'<a href="{escaped_url}">{escaped_text}</a>'
+            target_html = source_html
+        else:
+            source_html = render_inline(note.source)
+            target_html = render_inline(translations.get(note.segment_id, ""))
+        endnotes.append(
+            {
+                "id": note.id,
+                "marker": note.marker,
+                "page": note.page + 1,
+                "reference_id": reference_id,
+                "source_html": source_html,
+                "target_html": target_html,
+            }
+        )
+    metadata_title_zh = translations.get("meta.title", "")
     abstract_zh = translations.get("meta.abstract", "")
     template = _templates().get_template("paper.html.j2")
     output = template.render(
@@ -207,24 +354,12 @@ def build_paper(
         abstract_source_html=render_markdown(document.metadata.abstract),
         blocks=blocks,
         toc=toc,
+        front_notes=front_notes,
+        endnotes=endnotes,
+        asset_prefix=asset_prefix,
+        preview=preview,
     )
     atomic_write_text(paper_dir / "index.html", output)
-    paper_manifest = {
-        "paper_id": paper_id,
-        "job_id": document.job_id,
-        "item_key": document.source.item_key,
-        "title": document.metadata.title,
-        "title_zh": metadata_title_zh,
-        "creators": document.metadata.creators,
-        "date": document.metadata.date,
-        "publication": document.metadata.publication,
-        "doi": document.metadata.doi,
-        "tags": document.metadata.tags,
-        "href": f"papers/{paper_id}/index.html",
-    }
-    atomic_write_json(paper_dir / "paper.json", paper_manifest)
-    _write_shared_assets(library_root)
-    build_shelf(library_root)
     return paper_dir / "index.html"
 
 

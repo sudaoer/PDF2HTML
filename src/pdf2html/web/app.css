@@ -143,6 +143,18 @@ button { color: inherit; }
 .paper-meta div { display: flex; gap: .45rem; }
 .paper-meta dt { color: var(--muted); }
 .paper-meta dd { margin: 0; }
+.paper-front-notes {
+  display: grid;
+  gap: .45rem;
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: .8rem;
+}
+.paper-front-notes .pair { margin: 0; }
+.paper-front-notes .source { padding-top: .35rem; }
+.paper-front-notes sup, .paper-endnotes sup { margin-right: .25rem; font-weight: 700; }
 
 .pair, .source-only, figure, .table-block {
   position: relative;
@@ -198,6 +210,21 @@ figure, .table-block, .source-only {
 }
 .figure-open { display: block; width: 100%; padding: 0; border: 0; background: none; cursor: zoom-in; }
 figure img, .table-fallback { display: block; max-width: 100%; height: auto; margin: 0 auto; border-radius: 10px; }
+.figure-members {
+  display: grid;
+  grid-template-columns: repeat(var(--figure-columns), minmax(0, 1fr));
+  gap: .85rem;
+  align-items: end;
+}
+.figure-group.layout-column .figure-members { grid-template-columns: minmax(0, 1fr); }
+.figure-group.layout-grid .figure-members { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.figure-member { min-width: 0; text-align: center; }
+.figure-member img { width: 100%; }
+.subfigure-label {
+  display: block;
+  margin-top: .45rem;
+  font: .86rem/1 Georgia, "Times New Roman", serif;
+}
 figcaption, .table-caption { margin-top: 1rem; font-weight: 600; }
 .figure-note { margin-top: .7rem; color: var(--muted); font-size: .86em; }
 .table-scroll { max-width: 100%; overflow-x: auto; }
@@ -218,6 +245,18 @@ pre { overflow-x: auto; padding: 1rem; border-radius: 10px; background: var(--pa
 }
 .math-inline { display: inline-block; vertical-align: -.15em; }
 math { font-family: "Cambria Math", "STIX Two Math", serif; }
+
+.paper-endnotes {
+  margin-top: 4rem;
+  padding-top: 1.5rem;
+  border-top: 2px solid var(--line);
+}
+.paper-endnotes h2 { font-size: 1.15rem; }
+.paper-endnotes h2 span { margin-left: .35rem; color: var(--muted); font: .85em Georgia, serif; }
+.endnote { margin-bottom: 1rem; font-size: .86em; }
+.endnote-page { display: inline-block; margin-top: .35rem; color: var(--muted); font-size: .72rem; }
+.endnote-ref { color: var(--accent); text-decoration: none; }
+.layout-preview .reader-controls [data-mode] { display: none; }
 
 .mode-source .target { display: none !important; }
 .mode-source .source { padding-top: 0; border-top: 0; color: var(--ink); font-size: 1em; }
@@ -264,6 +303,7 @@ math { font-family: "Cambria Math", "STIX Two Math", serif; }
   .paper-meta { display: grid; gap: .35rem; }
   .pair > .source { font-size: .9em; }
   figure, .table-block, .source-only { margin-right: -.25rem; margin-left: -.25rem; padding: .8rem; border-radius: 12px; }
+  .figure-members { grid-template-columns: minmax(0, 1fr) !important; }
 }
 
 @media print {

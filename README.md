@@ -27,7 +27,46 @@ pixi run pdf2html prepare --collection "Reading Queue"
 pixi run pdf2html prepare --tag pdf2html
 ```
 
-`prepare` 会将每份 PDF 复制到 `.work/jobs/` 下，运行 MinerU，并在 `translation_tasks/` 中生成 JSON 文件。Codex 会把这些文件复制到同级的 `translations/` 目录，并填写每个 `target`，同时保留片段 ID、源文本、源哈希、公式、URL、DOI 字符串和引文标记。
+`prepare` 会将每份 PDF 复制到 `.work/jobs/` 下，运行 MinerU，执行保守的结构归一化，并生成源语言布局预览和 `layout_report.json`。此阶段不会生成翻译任务。Codex 必须先对照源 PDF、MinerU 块和桌面/移动预览完成版面审查；常见组合图和页注由确定性代码处理，特殊情况写入带哈希前置条件的 `layout_overrides.json`。
+
+修改或新增 override 后重新生成预览：
+
+```powershell
+pixi run pdf2html layout --job <job-id>
+```
+
+`layout_report.json` 的 `override_targets` 为每个可操作块给出 `id`、`page`、`bbox` 和 `block_hash`。override 必须逐字复制这些前置条件，并同时绑定 PDF 与 MinerU 内容哈希：
+
+```json
+{
+  "schema_version": 1,
+  "job_id": "<job-id>",
+  "source_sha256": "<manifest source.sha256>",
+  "content_sha256": "<layout_report normalization.content_sha256>",
+  "operations": [
+    {
+      "op": "group",
+      "targets": [
+        {"id": "<block-a>", "page": 0, "bbox": [0, 0, 0, 0], "block_hash": "<hash-a>"},
+        {"id": "<block-b>", "page": 0, "bbox": [0, 0, 0, 0], "block_hash": "<hash-b>"}
+      ],
+      "caption_from": "<block-id>",
+      "layout": "auto",
+      "reason": "Confirmed against the source PDF"
+    }
+  ]
+}
+```
+
+`move` 使用两个 target（移动块、锚点）以及 `before_id` 或 `after_id`；`reclassify` 使用一个 target 和受支持的 `kind`；`drop` 使用一个 target 和必填原因。override 不能修改文本、图片路径、译文或 HTML，任何前置条件失配都会使整份文件失效。
+
+预览通过后锁定结构并生成翻译任务：
+
+```powershell
+pixi run pdf2html finalize-layout --job <job-id>
+```
+
+`finalize-layout` 会按角色、源文本和源哈希复用唯一匹配的旧译文，归档旧翻译文件，并在 `translation_tasks/` 与 `translations/` 中写入和当前结构完全对齐的 JSON。Codex 只需填写剩余的 `target: null`，同时保留片段 ID、源文本、源哈希、公式、URL、DOI 字符串和引文标记。
 
 使用以下命令完成一个任务（job）：
 
@@ -47,4 +86,4 @@ pixi run typecheck
 pixi run test
 ```
 
-确定性校验（deterministic verification）会检查翻译完整性、受保护标记（protected tokens）、缺失媒体、未解析的模板标记（template markers）以及远程运行时依赖。此外，Codex 会将渲染出的 PDF 页面与生成的阅读器进行对比，并在交付前分别以桌面端和移动端宽度检查站点。
+确定性校验（deterministic verification）会检查翻译完整性、受保护标记（protected tokens）、缺失媒体、未解析的模板标记（template markers）、远程运行时依赖，以及空正文、孤立子图标题、正文页注和损坏的组合图。任何失效的 override 都会阻止布局锁定。此外，Codex 会将渲染出的 PDF 页面与生成的阅读器进行对比，并在交付前分别以桌面端和移动端宽度检查站点。

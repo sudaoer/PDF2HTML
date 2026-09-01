@@ -10,7 +10,8 @@ import httpx
 import typer
 from pydantic import ValidationError
 
-from .document import build_document, write_document, write_translation_tasks
+from .document import build_document, write_document
+from .layout import LayoutOverrideError, load_layout_overrides
 from .mineru_runner import (
     MinerUError,
     executable_path,
@@ -18,10 +19,22 @@ from .mineru_runner import (
     run_mineru,
 )
 from .models import Document, Glossary, JobManifest, MinerURecord, SourceReference
-from .render import build_paper
-from .translations import TranslationError, load_translations
-from .util import atomic_write_json, hash_file, read_json, relative_to, slugify, utc_now
-from .verify import VerificationError, verify_output
+from .render import build_layout_preview, build_paper
+from .translations import (
+    TranslationError,
+    load_translations,
+    reconcile_translation_artifacts,
+)
+from .util import (
+    atomic_write_json,
+    hash_file,
+    hash_text,
+    read_json,
+    relative_to,
+    slugify,
+    utc_now,
+)
+from .verify import VerificationError, structure_report, verify_output, write_structure_report
 from .zotero import Library, SelectedPaper, ZoteroClient, ZoteroError
 
 app = typer.Typer(
@@ -29,6 +42,8 @@ app = typer.Typer(
     help="Build an offline bilingual reading library from Zotero PDFs.",
     no_args_is_help=True,
 )
+
+LAYOUT_PIPELINE_VERSION = "2"
 
 
 def _root() -> Path:
@@ -53,6 +68,138 @@ def _load_manifest(job_id: str) -> JobManifest:
 def _save_manifest(manifest: JobManifest) -> None:
     manifest.updated_at = utc_now()
     atomic_write_json(_manifest_path(manifest.job_id), manifest.model_dump(mode="json"))
+
+
+def _layout_inputs(manifest: JobManifest) -> tuple[Path, str, Path, str, str]:
+    source_copy = _job_dir(manifest.job_id) / "source.pdf"
+    if not source_copy.is_file() or hash_file(source_copy) != manifest.source.sha256:
+        raise ValueError("The job source PDF is missing or its SHA-256 changed.")
+    content_path = _root() / manifest.mineru.content_list_path
+    if not content_path.is_file():
+        raise ValueError(f"MinerU content list is missing: {content_path}")
+    content_hash = hash_file(content_path)
+    override_path = _job_dir(manifest.job_id) / "layout_overrides.json"
+    override_hash = hash_file(override_path) if override_path.is_file() else ""
+    input_hash = hash_text(
+        ":".join(
+            (
+                LAYOUT_PIPELINE_VERSION,
+                manifest.source.sha256,
+                content_hash,
+                override_hash,
+            )
+        )
+    )
+    return content_path, content_hash, override_path, override_hash, input_hash
+
+
+def _write_layout(manifest: JobManifest) -> dict[str, Any]:
+    content_path, content_hash, override_path, override_hash, input_hash = _layout_inputs(
+        manifest
+    )
+    override_errors: list[str] = []
+    overrides = None
+    try:
+        overrides = load_layout_overrides(
+            override_path,
+            job_id=manifest.job_id,
+            source_sha256=manifest.source.sha256,
+            content_sha256=content_hash,
+        )
+        document = build_document(
+            job_id=manifest.job_id,
+            metadata=manifest.metadata,
+            source=manifest.source,
+            content_list_path=content_path,
+            content_sha256=content_hash,
+            overrides=overrides,
+        )
+    except LayoutOverrideError as exc:
+        override_errors.append(str(exc))
+        document = build_document(
+            job_id=manifest.job_id,
+            metadata=manifest.metadata,
+            source=manifest.source,
+            content_list_path=content_path,
+            content_sha256=content_hash,
+        )
+    document.layout_info.update(
+        {
+            "pipeline_version": LAYOUT_PIPELINE_VERSION,
+            "layout_input_hash": input_hash,
+            "overrides_sha256": override_hash,
+        }
+    )
+    job_dir = _job_dir(manifest.job_id)
+    layout_document_path = job_dir / "layout_document.json"
+    layout_report_path = job_dir / "layout_report.json"
+    preview_root = job_dir / "layout_preview"
+    write_document(document, layout_document_path)
+    preview_path = build_layout_preview(
+        document,
+        content_list_path=content_path,
+        preview_root=preview_root,
+    )
+    report = write_structure_report(
+        document,
+        layout_report_path,
+        extra_errors=override_errors,
+    )
+    manifest.layout_document_path = relative_to(layout_document_path, _root())
+    manifest.layout_preview_path = relative_to(preview_path, _root())
+    manifest.layout_report_path = relative_to(layout_report_path, _root())
+    manifest.layout_overrides_path = relative_to(override_path, _root())
+    manifest.layout_input_hash = input_hash
+    manifest.layout_document_hash = hash_file(layout_document_path)
+    manifest.translation_task_dir = ""
+    manifest.status = (
+        "awaiting_layout_review" if report["status"] == "passed" else "layout_review_required"
+    )
+    manifest.error = "; ".join(report["errors"])
+    manifest.warnings = list(report["warnings"])
+    _save_manifest(manifest)
+    return report
+
+
+def _assert_current_layout(manifest: JobManifest) -> tuple[Document, dict[str, Any]]:
+    _, _, _, _, input_hash = _layout_inputs(manifest)
+    if input_hash != manifest.layout_input_hash:
+        raise ValueError(
+            "Layout inputs changed; run the layout command and review the preview again."
+        )
+    layout_path = _root() / manifest.layout_document_path
+    report_path = _root() / manifest.layout_report_path
+    if not layout_path.is_file() or not report_path.is_file():
+        raise ValueError("Layout artifacts are missing; run the layout command first.")
+    if hash_file(layout_path) != manifest.layout_document_hash:
+        raise ValueError("The reviewed layout document changed; run layout again.")
+    report_raw = read_json(report_path)
+    if not isinstance(report_raw, dict) or report_raw.get("status") != "passed":
+        raise ValueError("Layout validation has not passed.")
+    document = Document.model_validate(read_json(layout_path))
+    current_report = structure_report(document)
+    if current_report["status"] != "passed":
+        raise ValueError("The reviewed layout document no longer passes structural validation.")
+    return document, current_report
+
+
+def _load_finalized_document(manifest: JobManifest) -> Document:
+    if not manifest.document_path or not manifest.layout_document_hash:
+        raise ValueError("The job has no finalized layout document.")
+    document_path = _root() / manifest.document_path
+    if not document_path.is_file():
+        raise ValueError(f"The finalized layout document is missing: {document_path}")
+    if hash_file(document_path) != manifest.layout_document_hash:
+        raise ValueError(
+            "The finalized document no longer matches the reviewed layout; "
+            "run finalize-layout again."
+        )
+    document = Document.model_validate(read_json(document_path))
+    if document.job_id != manifest.job_id:
+        raise ValueError(
+            f"The finalized document belongs to {document.job_id}, not {manifest.job_id}."
+        )
+    return document
 
 
 def _selected_items(
@@ -192,18 +339,6 @@ def _prepare_one(
             effort=effort,
             force=force_parse,
         )
-        document = build_document(
-            job_id=job_id,
-            metadata=selected.metadata,
-            source=source,
-            content_list_path=content_list,
-        )
-        document_path = job_dir / "document.json"
-        task_dir = job_dir / "translation_tasks"
-        translation_dir = job_dir / "translations"
-        translation_dir.mkdir(parents=True, exist_ok=True)
-        write_document(document, document_path)
-        task_paths = write_translation_tasks(document, task_dir)
         glossary_path = job_dir / "glossary.json"
         if not glossary_path.exists():
             atomic_write_json(
@@ -217,16 +352,14 @@ def _prepare_one(
             command=command or manifest.mineru.command,
             content_list_path=relative_to(content_list, _root()),
         )
-        manifest.document_path = relative_to(document_path, _root())
-        manifest.translation_task_dir = relative_to(task_dir, _root())
-        manifest.translation_dir = relative_to(translation_dir, _root())
-        manifest.status = "awaiting_translation"
-        _save_manifest(manifest)
+        manifest.document_path = ""
+        report = _write_layout(manifest)
         typer.echo(
-            f"Prepared {job_id}: {len(document.blocks)} blocks, "
-            f"{len(document.segments)} translation segments in {len(task_paths)} files."
+            f"Prepared {job_id}: layout {report['status']}, "
+            f"{report['blocks']} blocks and {report['figure_groups']} figure groups."
         )
-        typer.echo(f"Translation tasks: {task_dir}")
+        typer.echo(f"Layout preview: {_root() / manifest.layout_preview_path}")
+        typer.echo(f"Layout report: {_root() / manifest.layout_report_path}")
         return manifest
     except Exception as exc:
         manifest.status = "failed"
@@ -246,7 +379,7 @@ def prepare(
     effort: Annotated[str, typer.Option("--effort")] = "medium",
     force_parse: Annotated[bool, typer.Option("--force-parse")] = False,
 ) -> None:
-    """Copy selected Zotero PDFs, run MinerU, and create Codex translation tasks."""
+    """Copy selected PDFs, run MinerU, and create a layout review preview."""
     if backend not in {"hybrid-engine", "vlm-engine", "pipeline"}:
         raise typer.BadParameter("Unsupported local backend.")
     if effort not in {"medium", "high"}:
@@ -280,6 +413,69 @@ def prepare(
         typer.echo(f"ERROR: {failure}", err=True)
     if prepared == 0 or failures:
         raise typer.Exit(1)
+
+
+@app.command(name="layout")
+def layout_command(
+    job: Annotated[str, typer.Option("--job", help="Prepared job ID")],
+) -> None:
+    """Reapply deterministic repairs and overrides, then refresh the source preview."""
+    try:
+        manifest = _load_manifest(job)
+        report = _write_layout(manifest)
+        display_report = {key: value for key, value in report.items() if key != "override_targets"}
+        typer.echo(json.dumps(display_report, ensure_ascii=False, indent=2))
+        typer.echo(f"Layout preview: {_root() / manifest.layout_preview_path}")
+        if report["status"] != "passed":
+            raise typer.Exit(1)
+    except (ValidationError, OSError, ValueError) as exc:
+        typer.echo(f"ERROR: {exc}", err=True)
+        raise typer.Exit(1) from exc
+
+
+@app.command(name="finalize-layout")
+def finalize_layout_command(
+    job: Annotated[str, typer.Option("--job", help="Reviewed job ID")],
+) -> None:
+    """Lock an unchanged reviewed layout and create translation artifacts."""
+    try:
+        manifest = _load_manifest(job)
+        document, _ = _assert_current_layout(manifest)
+        job_dir = _job_dir(job)
+        document_path = job_dir / "document.json"
+        task_dir = job_dir / "translation_tasks"
+        translation_dir = job_dir / "translations"
+        reuse_report_path = job_dir / "translation_reuse.json"
+        old_document_path = job_dir / "document.json"
+        archive_key = (
+            hash_file(old_document_path)[:16]
+            if old_document_path.is_file()
+            else "initial"
+        )
+        reuse_report = reconcile_translation_artifacts(
+            document,
+            task_dir=task_dir,
+            translation_dir=translation_dir,
+            history_dir=job_dir / "translation_history",
+            archive_key=archive_key,
+            report_path=reuse_report_path,
+        )
+        write_document(document, document_path)
+        manifest.document_path = relative_to(document_path, _root())
+        manifest.translation_task_dir = relative_to(task_dir, _root())
+        manifest.translation_dir = relative_to(translation_dir, _root())
+        manifest.translation_reuse_report = relative_to(reuse_report_path, _root())
+        manifest.status = "awaiting_translation"
+        manifest.error = ""
+        _save_manifest(manifest)
+        typer.echo(f"Finalized layout: {document_path}")
+        typer.echo(json.dumps(reuse_report, ensure_ascii=False, indent=2))
+        typer.echo(f"Translation tasks: {task_dir}")
+    except (ValidationError, OSError, ValueError) as exc:
+        typer.echo(f"ERROR: {exc}", err=True)
+        raise typer.Exit(1) from exc
+
+
 @app.command(name="build")
 def build_command(
     job: Annotated[str, typer.Option("--job", help="Prepared job ID")],
@@ -287,10 +483,11 @@ def build_command(
     """Validate Codex translations and build the paper plus shelf."""
     try:
         manifest = _load_manifest(job)
-        document_path = _root() / manifest.document_path
+        if manifest.status not in {"awaiting_translation", "built", "verified"}:
+            raise ValueError("The layout must be finalized before build.")
         translation_dir = _root() / manifest.translation_dir
         content_list_path = _root() / manifest.mineru.content_list_path
-        document = Document.model_validate(read_json(document_path))
+        document = _load_finalized_document(manifest)
         translations = load_translations(document, translation_dir)
         html_path = build_paper(
             document,
@@ -315,7 +512,9 @@ def verify(
     """Run deterministic offline and translation checks for a built paper."""
     try:
         manifest = _load_manifest(job)
-        document = Document.model_validate(read_json(_root() / manifest.document_path))
+        if manifest.status not in {"built", "verified"}:
+            raise ValueError("Build the finalized paper before verification.")
+        document = _load_finalized_document(manifest)
         report = verify_output(
             document,
             _root() / manifest.translation_dir,
@@ -325,7 +524,7 @@ def verify(
         manifest.status = "verified"
         _save_manifest(manifest)
         typer.echo(json.dumps(report, ensure_ascii=False, indent=2))
-    except (ValidationError, TranslationError, VerificationError, OSError) as exc:
+    except (ValidationError, TranslationError, VerificationError, OSError, ValueError) as exc:
         typer.echo(f"ERROR: {exc}", err=True)
         raise typer.Exit(1) from exc
 

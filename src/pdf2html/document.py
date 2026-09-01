@@ -4,9 +4,13 @@ import re
 from pathlib import Path
 from typing import Any, cast
 
+from .layout import SUBFIGURE_PREFIX, apply_layout_overrides, block_fingerprint
 from .models import (
     Document,
     DocumentBlock,
+    DocumentNote,
+    FigureMember,
+    LayoutOverrides,
     PaperMetadata,
     Segment,
     SourceReference,
@@ -23,6 +27,7 @@ PROTECTED_PATTERNS = [
     re.compile(r"\[(?:\d+[a-z]?\s*[,;\-]?\s*)+\]"),
     re.compile(r"https?://[^\s)>]+"),
     re.compile(r"10\.\d{4,9}/[-._;()/:A-Z0-9]+", re.IGNORECASE),
+    re.compile(r"<sup>[^<]+</sup>", re.IGNORECASE),
 ]
 
 SKIPPED_TYPES = {"header", "footer", "page_number"}
@@ -166,7 +171,7 @@ def _repair_interrupted_paragraphs(blocks: list[DocumentBlock]) -> list[Document
         same_page = before.page == floating.page == after.page
         interrupted = (
             before.kind == "paragraph"
-            and floating.kind in {"figure", "table"}
+            and floating.kind in {"figure", "figure_group", "table"}
             and after.kind == "paragraph"
             and bool(before.source.strip())
             and not re.search(r"[.!?。！？:：;；]['\"”’)]*$", before.source.strip())
@@ -220,30 +225,53 @@ def build_document(
     metadata: PaperMetadata,
     source: SourceReference,
     content_list_path: Path,
+    content_sha256: str = "",
+    overrides: LayoutOverrides | None = None,
 ) -> Document:
     entries = _content_entries(read_json(content_list_path))
+    primitive_blocks = _primitive_blocks(entries)
+    nonempty_blocks, empty_count = _drop_empty_blocks(primitive_blocks)
+    grouped_blocks, group_count = _group_adjacent_figures(nonempty_blocks)
+    override_targets = [
+        {
+            "id": block.id,
+            "kind": block.kind,
+            "page": block.page,
+            "bbox": block.bbox,
+            "block_hash": block_fingerprint(block),
+        }
+        for block in grouped_blocks
+    ]
+    overridden_blocks, override_count = apply_layout_overrides(grouped_blocks, overrides)
+    body_blocks, front_notes, endnotes = _extract_notes(overridden_blocks)
+    body_blocks = _repair_interrupted_paragraphs(body_blocks)
+
+    blocks, front_notes, endnotes, segments = _assign_segments(
+        body_blocks,
+        front_notes,
+        endnotes,
+        metadata=metadata,
+    )
+    return Document(
+        job_id=job_id,
+        metadata=metadata,
+        source=source,
+        blocks=blocks,
+        segments=segments,
+        front_matter_notes=front_notes,
+        endnotes=endnotes,
+        layout_info={
+            "content_sha256": content_sha256,
+            "automatic_figure_groups": group_count,
+            "dropped_empty_blocks": empty_count,
+            "overrides_applied": override_count,
+            "override_targets": override_targets,
+        },
+    )
+
+
+def _primitive_blocks(entries: list[dict[str, Any]]) -> list[DocumentBlock]:
     blocks: list[DocumentBlock] = []
-    segments: list[Segment] = []
-
-    def add_segment(segment_id: str, role: str, text: str) -> str:
-        clean = text.strip()
-        if not clean:
-            return ""
-        segments.append(
-            Segment(
-                id=segment_id,
-                role=role,
-                source=clean,
-                source_hash=hash_text(clean),
-                protected=_protected_tokens(clean),
-            )
-        )
-        return segment_id
-
-    add_segment("meta.title", "title", metadata.title)
-    if metadata.abstract:
-        add_segment("meta.abstract", "abstract", metadata.abstract)
-
     for index, raw in enumerate(entries, start=1):
         block_id = f"b{index:04d}"
         kind = str(raw.get("type") or raw.get("block_type") or "text").lower()
@@ -275,42 +303,28 @@ def build_document(
             or raw.get("footnote")
         )
         asset = _string(raw.get("img_path") or raw.get("image_path") or raw.get("asset"))
-        segment_id = ""
-        caption_segment_id = ""
-        footnote_segment_id = ""
-
         if kind == "text":
             rendered_kind = "heading" if level > 0 else "paragraph"
-            segment_id = add_segment(f"{block_id}.text", rendered_kind, source_text)
         elif kind == "list":
             items = raw.get("list_items")
             if isinstance(items, list):
                 source_text = "\n".join(f"- {_string(item)}" for item in items if _string(item))
             rendered_kind = "reference" if subtype == "ref_text" else "list"
-            if rendered_kind != "reference":
-                segment_id = add_segment(f"{block_id}.text", "list", source_text)
         elif kind in {"image", "chart"}:
             rendered_kind = "figure"
-            caption_segment_id = add_segment(f"{block_id}.caption", "caption", caption)
-            footnote_segment_id = add_segment(f"{block_id}.footnote", "caption", footnote)
         elif kind == "table":
             rendered_kind = "table"
             source_text = _string(raw.get("table_body") or raw.get("content") or source_text)
-            segment_id = add_segment(f"{block_id}.table", "table", source_text)
-            caption_segment_id = add_segment(f"{block_id}.caption", "caption", caption)
-            footnote_segment_id = add_segment(f"{block_id}.footnote", "caption", footnote)
         elif kind == "equation":
             rendered_kind = "equation"
         elif kind == "code":
             rendered_kind = "code"
-            caption_segment_id = add_segment(f"{block_id}.caption", "caption", caption)
-        elif kind in {"aside_text", "page_footnote"}:
+        elif kind == "page_footnote":
+            rendered_kind = "page_footnote"
+        elif kind == "aside_text":
             rendered_kind = "aside"
-            segment_id = add_segment(f"{block_id}.text", "footnote", source_text)
         else:
             rendered_kind = kind
-            if source_text:
-                segment_id = add_segment(f"{block_id}.text", "paragraph", source_text)
 
         blocks.append(
             DocumentBlock(
@@ -320,23 +334,251 @@ def build_document(
                 level=level,
                 subtype=subtype,
                 source=source_text,
-                segment_id=segment_id,
                 asset=asset,
                 caption_source=caption,
-                caption_segment_id=caption_segment_id,
                 footnote_source=footnote,
-                footnote_segment_id=footnote_segment_id,
                 bbox=bbox,
                 extra={"mineru_type": kind},
             )
         )
-    return Document(
-        job_id=job_id,
-        metadata=metadata,
-        source=source,
-        blocks=_repair_interrupted_paragraphs(blocks),
-        segments=segments,
+    return blocks
+
+
+def _drop_empty_blocks(blocks: list[DocumentBlock]) -> tuple[list[DocumentBlock], int]:
+    text_kinds = {"paragraph", "heading", "list", "reference", "aside", "page_footnote"}
+    retained = [
+        block
+        for block in blocks
+        if block.kind not in text_kinds or bool(block.source.strip())
+    ]
+    return retained, len(blocks) - len(retained)
+
+
+FIGURE_CAPTION = re.compile(r"\b(?:Figure|Fig\.)\s+\d+\s*:", re.IGNORECASE)
+
+
+def _subfigure_parts(block: DocumentBlock) -> tuple[str, str]:
+    match = SUBFIGURE_PREFIX.match(block.caption_source)
+    if match is None:
+        return "", block.caption_source.strip()
+    return match.group(1).lower(), block.caption_source[match.end() :].strip()
+
+
+def _horizontal_neighbors(left: DocumentBlock, right: DocumentBlock) -> bool:
+    if left.page != right.page or len(left.bbox) != 4 or len(right.bbox) != 4:
+        return False
+    left_height = max(left.bbox[3] - left.bbox[1], 0.0)
+    right_height = max(right.bbox[3] - right.bbox[1], 0.0)
+    shorter_height = min(left_height, right_height)
+    if shorter_height <= 0:
+        return False
+    overlap = max(0.0, min(left.bbox[3], right.bbox[3]) - max(left.bbox[1], right.bbox[1]))
+    if overlap / shorter_height < 0.85:
+        return False
+    left_width = max(left.bbox[2] - left.bbox[0], 0.0)
+    right_width = max(right.bbox[2] - right.bbox[0], 0.0)
+    smaller_width = min(left_width, right_width)
+    if smaller_width <= 0 or right.bbox[0] < left.bbox[0]:
+        return False
+    gap = right.bbox[0] - left.bbox[2]
+    return -0.1 * smaller_width <= gap <= 0.25 * smaller_width
+
+
+def _automatic_group(run: list[DocumentBlock]) -> DocumentBlock | None:
+    if len(run) < 2 or any(block.footnote_source for block in run):
+        return None
+    parts = [_subfigure_parts(block) for block in run]
+    expected = [f"({chr(ord('a') + index)})" for index in range(len(run))]
+    labels = [label for label, _ in parts]
+    if labels != expected:
+        return None
+    full = [(block, body) for block, (_, body) in zip(run, parts, strict=True) if body]
+    if len(full) != 1 or FIGURE_CAPTION.search(full[0][1]) is None:
+        return None
+    caption_block, caption = full[0]
+    caption_folded = caption.casefold()
+    if any(label not in caption_folded for label in labels):
+        return None
+    members = [
+        FigureMember(
+            id=block.id,
+            asset=block.asset,
+            label=label,
+            page=block.page,
+            bbox=block.bbox,
+        )
+        for block, label in zip(run, labels, strict=True)
+    ]
+    if any(not member.asset for member in members):
+        return None
+    return DocumentBlock(
+        id=f"fg-{'-'.join(block.id for block in run)}",
+        kind="figure_group",
+        page=run[0].page,
+        caption_source=caption,
+        bbox=[
+            min(block.bbox[0] for block in run),
+            min(block.bbox[1] for block in run),
+            max(block.bbox[2] for block in run),
+            max(block.bbox[3] for block in run),
+        ],
+        members=members,
+        layout="row",
+        extra={
+            "mineru_type": "figure_group",
+            "caption_origin_id": caption_block.id,
+            "origin_block_ids": [block.id for block in run],
+            "automatic": True,
+        },
     )
+
+
+def _group_adjacent_figures(
+    blocks: list[DocumentBlock],
+) -> tuple[list[DocumentBlock], int]:
+    grouped: list[DocumentBlock] = []
+    group_count = 0
+    index = 0
+    while index < len(blocks):
+        current = blocks[index]
+        label, _ = _subfigure_parts(current)
+        if current.kind != "figure" or label != "(a)":
+            grouped.append(current)
+            index += 1
+            continue
+        run = [current]
+        cursor = index + 1
+        while cursor < len(blocks):
+            following = blocks[cursor]
+            expected = f"({chr(ord('a') + len(run))})"
+            following_label, _ = _subfigure_parts(following)
+            if (
+                following.kind != "figure"
+                or following_label != expected
+                or not _horizontal_neighbors(run[-1], following)
+            ):
+                break
+            run.append(following)
+            cursor += 1
+        candidate = _automatic_group(run)
+        if candidate is None:
+            grouped.extend(run)
+        else:
+            grouped.append(candidate)
+            group_count += 1
+        index += len(run)
+    return grouped, group_count
+
+
+NOTE_MARKER = re.compile(r"^\s*<sup>([^<]+)</sup>\s*", re.IGNORECASE)
+PURE_URL = re.compile(r"^(?:https?://|www\.)\S+$", re.IGNORECASE)
+
+
+def _extract_notes(
+    blocks: list[DocumentBlock],
+) -> tuple[list[DocumentBlock], list[DocumentNote], list[DocumentNote]]:
+    body: list[DocumentBlock] = []
+    front_notes: list[DocumentNote] = []
+    endnotes: list[DocumentNote] = []
+    for block in blocks:
+        if block.kind not in {"page_footnote", "front_note", "endnote"}:
+            body.append(block)
+            continue
+        match = NOTE_MARKER.match(block.source)
+        marker = match.group(1).strip() if match else ""
+        note_source = block.source[match.end() :].strip() if match else block.source.strip()
+        folded = note_source.casefold()
+        forced_front = block.kind == "front_note"
+        forced_end = block.kind == "endnote"
+        copyright_note = bool(
+            re.search(r"copyright|©|all rights reserved", note_source, re.IGNORECASE)
+        )
+        author_note = (
+            block.page == 0
+            and (
+                marker in {"*", "†", "‡"}
+                or "contributed equally" in folded
+                or "corresponding author" in folded
+            )
+        )
+        is_front = forced_front or (not forced_end and (copyright_note or author_note))
+        url = note_source.replace("\\#", "#") if PURE_URL.fullmatch(note_source) else ""
+        if url.startswith("www."):
+            url = f"https://{url}"
+        note_kind = (
+            "copyright"
+            if is_front and copyright_note
+            else "author_note"
+            if is_front
+            else "endnote"
+        )
+        note = DocumentNote(
+            id=block.id,
+            kind=note_kind,
+            marker=marker,
+            page=block.page,
+            source=note_source,
+            url=url,
+            bbox=block.bbox,
+        )
+        if is_front:
+            front_notes.append(note)
+        else:
+            endnotes.append(note)
+    return body, front_notes, endnotes
+
+
+def _assign_segments(
+    blocks: list[DocumentBlock],
+    front_notes: list[DocumentNote],
+    endnotes: list[DocumentNote],
+    *,
+    metadata: PaperMetadata,
+) -> tuple[list[DocumentBlock], list[DocumentNote], list[DocumentNote], list[Segment]]:
+    rendered_blocks = [block.model_copy(deep=True) for block in blocks]
+    rendered_front = [note.model_copy(deep=True) for note in front_notes]
+    rendered_end = [note.model_copy(deep=True) for note in endnotes]
+    segments: list[Segment] = []
+
+    def add_segment(segment_id: str, role: str, text: str) -> str:
+        clean = text.strip()
+        if not clean:
+            return ""
+        segments.append(
+            Segment(
+                id=segment_id,
+                role=role,
+                source=clean,
+                source_hash=hash_text(clean),
+                protected=_protected_tokens(clean),
+            )
+        )
+        return segment_id
+
+    add_segment("meta.title", "title", metadata.title)
+    if metadata.abstract:
+        add_segment("meta.abstract", "abstract", metadata.abstract)
+
+    for block in rendered_blocks:
+        if block.kind in {"heading", "paragraph", "list"}:
+            block.segment_id = add_segment(f"{block.id}.text", block.kind, block.source)
+        elif block.kind == "table":
+            block.segment_id = add_segment(f"{block.id}.table", "table", block.source)
+        elif block.source and block.kind not in {"equation", "code", "reference"}:
+            block.segment_id = add_segment(f"{block.id}.text", "paragraph", block.source)
+        if block.caption_source:
+            caption_origin = str(block.extra.get("caption_origin_id") or block.id)
+            block.caption_segment_id = add_segment(
+                f"{caption_origin}.caption", "caption", block.caption_source
+            )
+        if block.footnote_source:
+            block.footnote_segment_id = add_segment(
+                f"{block.id}.footnote", "caption", block.footnote_source
+            )
+    for note in [*rendered_front, *rendered_end]:
+        if note.source and not note.url:
+            note.segment_id = add_segment(f"{note.id}.note", "footnote", note.source)
+    return rendered_blocks, rendered_front, rendered_end, segments
 
 
 def write_translation_tasks(
@@ -344,6 +586,7 @@ def write_translation_tasks(
     task_dir: Path,
     *,
     max_source_chars: int = 9000,
+    targets: dict[str, str] | None = None,
 ) -> list[Path]:
     task_dir.mkdir(parents=True, exist_ok=True)
     for old in task_dir.glob("part-*.json"):
@@ -357,6 +600,7 @@ def write_translation_tasks(
             role=segment.role,
             source_hash=segment.source_hash,
             source=segment.source,
+            target=(targets or {}).get(segment.id),
         )
         if current and current_chars + len(segment.source) > max_source_chars:
             chunks.append(current)
