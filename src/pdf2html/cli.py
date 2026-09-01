@@ -8,6 +8,7 @@ from typing import Annotated, Any, cast
 
 import httpx
 import typer
+import uvicorn
 from pydantic import ValidationError
 
 from .bundle import BundleError, build_bundle
@@ -28,6 +29,7 @@ from .models import (
     migrate_job_manifest,
 )
 from .render import build_layout_preview, build_paper
+from .server import ServerError, create_app
 from .translations import (
     TranslationError,
     load_translations,
@@ -560,6 +562,22 @@ def verify(
     ) as exc:
         typer.echo(f"ERROR: {exc}", err=True)
         raise typer.Exit(1) from exc
+
+
+@app.command()
+def serve(
+    port: Annotated[
+        int,
+        typer.Option("--port", min=1, max=65535, help="Loopback HTTP port"),
+    ] = 8765,
+) -> None:
+    """Serve the read-only Vue library on 127.0.0.1."""
+    try:
+        application = create_app(library_root=_root() / "output" / "library")
+    except (OSError, ServerError, ValueError) as exc:
+        typer.echo(f"ERROR: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    uvicorn.run(application, host="127.0.0.1", port=port)
 
 
 @app.command()

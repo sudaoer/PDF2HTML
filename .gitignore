@@ -11,6 +11,9 @@ tmp/
 .pyright/
 __pycache__/
 *.py[cod]
+node_modules/
+.pnpm-store/
+coverage/
 
 # MinerU model/runtime state when redirected into the workspace
 models/

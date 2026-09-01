@@ -26,7 +26,9 @@ pypdf = ">=6.6,<7"
 typer = ">=0.20,<1"
 
 [pypi-dependencies]
+fastapi = ">=0.116,<1"
 mineru = { version = ">=3.3,<4", extras = ["all"] }
 latex2mathml = ">=3.79,<4"
 torch = { url = "https://download.pytorch.org/whl/cu128/torch-2.8.0%2Bcu128-cp312-cp312-win_amd64.whl" }
 torchvision = { url = "https://download.pytorch.org/whl/cu128/torchvision-0.23.0%2Bcu128-cp312-cp312-win_amd64.whl" }
+uvicorn = ">=0.35,<1"

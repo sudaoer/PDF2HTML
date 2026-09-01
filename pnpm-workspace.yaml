@@ -1,0 +1,10 @@
+packages:
+  - .
+
+allowBuilds:
+  esbuild: true
+
+confirmModulesPurge: false
+
+onlyBuiltDependencies:
+  - esbuild

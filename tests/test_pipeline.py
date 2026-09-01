@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 from bs4 import BeautifulSoup
+from fastapi.testclient import TestClient
 
 from pdf2html.bundle import BundleError, PaperBundle, build_bundle
 from pdf2html.bundle_verify import BundleVerificationError, verify_bundle
@@ -23,6 +24,7 @@ from pdf2html.models import (
     migrate_job_manifest,
 )
 from pdf2html.render import _parse_equation, build_paper, render_equation, render_markdown
+from pdf2html.server import create_app
 from pdf2html.translations import (
     TranslationError,
     load_translations,
@@ -293,6 +295,73 @@ def test_bundle_verifier_rejects_invalid_equation_tag(tmp_path: Path) -> None:
     )
     with pytest.raises(BundleVerificationError, match="invalid tag command"):
         verify_bundle(result.bundle_path)
+
+
+def write_test_web_root(root: Path) -> Path:
+    web_root = root / "web"
+    assets = web_root / "assets"
+    vite = web_root / ".vite"
+    assets.mkdir(parents=True)
+    vite.mkdir()
+    (web_root / "index.html").write_text(
+        '<!doctype html><div id="app"></div><script src="/assets/app.js"></script>',
+        encoding="utf-8",
+    )
+    (assets / "app.js").write_text("console.log('fixture')", encoding="utf-8")
+    atomic_write_json(vite / "manifest.json", {"index.html": {"file": "assets/app.js"}})
+    return web_root
+
+
+def test_read_only_http_routes_and_incremental_corruption(tmp_path: Path) -> None:
+    document, content_path = prepared_document(tmp_path)
+    translations = {segment.id: f"译文：{segment.source}" for segment in document.segments}
+    library_root = tmp_path / "library"
+    result = build_bundle(
+        document,
+        translations,
+        content_list_path=content_path,
+        library_root=library_root,
+    )
+    app = create_app(library_root=library_root, web_root=write_test_web_root(tmp_path))
+    client = TestClient(app)
+
+    shell = client.get("/")
+    assert shell.status_code == 200
+    assert shell.headers["content-type"].startswith("text/html")
+    shelf = client.get("/api/shelf")
+    assert shelf.status_code == 200
+    assert shelf.json()["papers"][0]["paper_id"] == result.paper_id
+    assert client.get(
+        "/api/shelf",
+        headers={"If-None-Match": shelf.headers["etag"]},
+    ).status_code == 304
+    assert client.get(f"/papers/{result.paper_id}", follow_redirects=False).status_code == 307
+    assert client.get(f"/papers/{result.paper_id}/paper.json").status_code == 200
+    markdown = client.get(f"/papers/{result.paper_id}/paper.zh-CN.md")
+    assert markdown.status_code == 200
+    assert "译文：Routing Networks" in markdown.text
+    bundle = PaperBundle.model_validate(read_json(result.bundle_path))
+    media_name = PurePosixPath(bundle.media[0].path).name
+    assert client.get(f"/papers/{result.paper_id}/media/{media_name}").content.startswith(
+        b"\x89PNG"
+    )
+    assert client.get(f"/papers/{result.paper_id}/media/unlisted.png").status_code == 404
+    assert client.get("/assets/app.js").status_code == 200
+    assert client.get("/assets/../index.html").status_code == 404
+    search = client.get("/api/search", params={"q": "Routing", "limit": 10})
+    assert search.status_code == 200
+    assert search.json()["results"][0]["paper_id"] == result.paper_id
+
+    damaged = read_json(result.bundle_path)
+    assert isinstance(damaged, dict)
+    damaged["unexpected"] = True
+    atomic_write_json(result.bundle_path, damaged)
+    broken = client.get(f"/papers/{result.paper_id}/paper.json")
+    assert broken.status_code == 422
+    assert broken.json()["code"] == "invalid_bundle"
+    shelf_after = client.get("/api/shelf").json()
+    assert shelf_after["papers"] == []
+    assert shelf_after["errors"][0]["paper_id"] == result.paper_id
 
 
 @pytest.mark.parametrize(
