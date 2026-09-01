@@ -1,0 +1,14 @@
+[workspace]
+authors = ["R9950X_Sudoer <hhj@sudoer.cn>"]
+channels = ["conda-forge"]
+name = "PDF2HTML"
+platforms = ["win-64"]
+version = "0.1.0"
+
+[tasks]
+
+[dependencies]
+python = ">=3.14.7,<3.15"
+pytest = ">=9.1.1,<10"
+ruff = ">=0.16.5,<0.17"
+pyright = ">=1.1.411,<2"
