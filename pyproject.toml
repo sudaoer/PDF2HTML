@@ -19,5 +19,5 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 pythonVersion = "3.12"
 typeCheckingMode = "standard"
 include = ["src", "tests"]
-exclude = [".work", "output"]
+exclude = [".work", "output", "**/node_modules", "**/__pycache__", "**/.*"]
 reportMissingTypeStubs = false
