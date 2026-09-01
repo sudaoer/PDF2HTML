@@ -12,6 +12,10 @@ from .util import atomic_write_json
 SUBFIGURE_ONLY = re.compile(r"^\s*\([a-z]\)\s*$", re.IGNORECASE)
 FIGURE_CAPTION = re.compile(r"\b(?:Figure|Fig\.)\s+\d+\b", re.IGNORECASE)
 TEXT_KINDS = {"paragraph", "heading", "list", "aside", "page_footnote"}
+DUPLICATE_LIST_MARKER = re.compile(
+    r"^\s*[-+*]\s+(?:[-+*]|[•◦▪●○])\s+",
+    re.MULTILINE,
+)
 
 
 def _nearby_figure(left: DocumentBlock, right: DocumentBlock) -> bool:
@@ -86,6 +90,8 @@ def structure_report(
                 errors.append(f"Heading {block.id} has unresolved line-level hierarchy.")
         elif block.level != 0:
             errors.append(f"Non-heading block {block.id} retains heading level {block.level}.")
+        if block.kind == "list" and DUPLICATE_LIST_MARKER.search(block.source):
+            errors.append(f"List {block.id} contains repeated item markers.")
         if block.kind == "figure":
             if not block.asset:
                 errors.append(f"Figure {block.id} has no asset.")

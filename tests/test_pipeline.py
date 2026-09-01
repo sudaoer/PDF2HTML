@@ -581,6 +581,73 @@ def test_mineru_v2_pages_are_flattened(tmp_path: Path) -> None:
     assert document.blocks[1].page == 0
     assert "$L_1$" in document.blocks[1].source
     assert document.blocks[2].page == 1
+    assert document.blocks[2].source == "- [1] Reference"
+
+
+def test_list_item_markers_are_canonicalized_without_changing_content(
+    tmp_path: Path,
+) -> None:
+    def item(source: str) -> dict[str, object]:
+        return {
+            "item_type": "text",
+            "item_content": [{"type": "text", "content": source}],
+        }
+
+    payload = [
+        [
+            {
+                "type": "list",
+                "content": {
+                    "list_type": "text_list",
+                    "list_items": [
+                        item("- First"),
+                        item("• Second"),
+                        item("Third"),
+                        item("--flag stays"),
+                        item("1. Numbered text"),
+                    ],
+                },
+            }
+        ]
+    ]
+    path = tmp_path / "prefixed-list.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    document = build_document(
+        job_id="prefixed-list",
+        metadata=PaperMetadata(title="List paper"),
+        source=source_reference(),
+        content_list_path=path,
+    )
+
+    block = document.blocks[0]
+    assert block.kind == "list"
+    assert block.source == (
+        "- First\n"
+        "- Second\n"
+        "- Third\n"
+        "- --flag stays\n"
+        "- 1. Numbered text"
+    )
+    rendered = render_markdown(block.source)
+    assert rendered.count("<ul>") == 1
+    assert rendered.count("<ol>") == 1
+    assert rendered.count("<li>") == 6
+
+
+def test_structure_report_rejects_repeated_list_markers(tmp_path: Path) -> None:
+    document, _ = prepared_document(tmp_path)
+    document.blocks.append(
+        DocumentBlock(
+            id="bad-list",
+            kind="list",
+            page=0,
+            source="- - Nested by mistake",
+        )
+    )
+
+    report = structure_report(document)
+    assert "List bad-list contains repeated item markers." in report["errors"]
 
 
 @pytest.mark.parametrize(

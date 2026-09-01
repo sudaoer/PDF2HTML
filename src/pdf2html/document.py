@@ -38,6 +38,7 @@ KEYWORD_MARKER = re.compile(
 )
 MAX_KEYWORD_ITEMS = 32
 MAX_KEYWORD_ITEM_CHARS = 160
+UNORDERED_LIST_PREFIX = re.compile(r"^\s*(?:[-+*]|[•◦▪●○])\s+")
 
 
 def _string(value: Any) -> str:
@@ -46,6 +47,10 @@ def _string(value: Any) -> str:
     if isinstance(value, list):
         return "\n".join(str(part).strip() for part in value if str(part).strip())
     return ""
+
+
+def _normalize_list_item(value: Any) -> str:
+    return UNORDERED_LIST_PREFIX.sub("", _string(value), count=1).strip()
 
 
 def _protected_tokens(text: str) -> list[str]:
@@ -766,7 +771,8 @@ def _primitive_blocks(entries: list[dict[str, Any]]) -> list[DocumentBlock]:
         elif kind == "list":
             items = raw.get("list_items")
             if isinstance(items, list):
-                source_text = "\n".join(f"- {_string(item)}" for item in items if _string(item))
+                normalized_items = [_normalize_list_item(item) for item in items]
+                source_text = "\n".join(f"- {item}" for item in normalized_items if item)
             rendered_kind = "reference" if subtype == "ref_text" else "list"
         elif kind in {"image", "chart"}:
             rendered_kind = "figure"
