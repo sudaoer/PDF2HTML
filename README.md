@@ -1,6 +1,6 @@
 # PDF2HTML
 
-PDF2HTML 是一个由 Codex 运行的本地工作流，用于把 Zotero 中的论文转换为响应式（responsive）的离线双语阅读页面。Zotero 始终保持只读，MinerU 在本地 NVIDIA GPU 上运行，由当前活跃的 Codex 会话提供忠实可靠的英文到简体中文翻译。
+PDF2HTML 是一个由 Codex 运行的本地工作流，用于把 Zotero 中的论文转换为面向电脑和平板横屏等宽屏设备的离线双语阅读页面。网页正式支持宽度不低于 `1024 CSS px` 的视口；更窄的窗口或手机仅尽力显示，不承诺布局效果，也不纳入验收。Zotero 始终保持只读，MinerU 在本地 NVIDIA GPU 上运行，由当前活跃的 Codex 会话提供忠实可靠的英文到简体中文翻译。
 
 ## 环境准备
 
@@ -32,7 +32,7 @@ pixi run pdf2html prepare --collection "Reading Queue"
 pixi run pdf2html prepare --tag pdf2html
 ```
 
-`prepare` 会将每份 PDF 复制到 `.work/jobs/` 下，运行 MinerU，执行保守的结构归一化，并生成源语言布局预览和 `layout_report.json`。此阶段不会生成翻译任务。Codex 必须先对照源 PDF、MinerU 块和桌面/移动预览完成版面审查；常见组合图和页注由确定性代码处理，特殊情况写入带哈希前置条件的 `layout_overrides.json`。
+`prepare` 会将每份 PDF 复制到 `.work/jobs/` 下，运行 MinerU，执行保守的结构归一化，并生成源语言布局预览和 `layout_report.json`。此阶段不会生成翻译任务。Codex 必须先对照源 PDF、MinerU 块，以及桌面和 `1024 CSS px` 平板横屏宽度的预览完成版面审查；常见组合图和页注由确定性代码处理，特殊情况写入带哈希前置条件的 `layout_overrides.json`。
 
 标题归一化会同时哈希 MinerU 的 content list 与 `middle.json` 行级结构。论文元数据标题是唯一的 `h1`，正文主节从 `h2` 开始；`layout_report.json` 的 `heading_outline` 会列出每个标题的原始层级、最终层级、对齐方式和判定来源。自动判定优先使用明确的十进制编号与可信 MinerU 层级，只有在栏内居中/左对齐证据形成稳定分组时才推断 `h2`/`h3`。
 
@@ -114,4 +114,4 @@ pnpm build
 Markdown AST、受保护 token、公式、块/段落标记、图形组、媒体哈希和路径安全，
 并通过应用内 HTTP 请求验证 shelf、Markdown、JSON、media、assets、全文搜索与
 ETag/304。任何失效的 override 都会阻止布局锁定。此外，Codex 会将源 PDF 页面与
-Vue 阅读器进行对比，并在交付前分别以桌面端和移动端宽度检查站点。
+Vue 阅读器进行对比，并在交付前分别以桌面宽度和 `1024 CSS px` 平板横屏宽度检查站点。

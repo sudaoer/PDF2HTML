@@ -15,6 +15,14 @@ verified.
 - PDF parsing is local. Translation text is sent only through the active Codex
   session; do not add a translation API or credentials.
 
+## Supported display contract
+
+- The reader targets computers and tablets in landscape orientation. Its
+  supported minimum viewport width is 1024 CSS px, inclusive.
+- Narrower windows and phones are best effort only: do not treat them as a QA
+  target or add phone-specific layout constraints. Keep device-independent
+  wrapping and local overflow protections for figures, tables, and formulas.
+
 ## Required paper workflow
 
 1. Run `pixi run pdf2html preflight`.
@@ -22,7 +30,8 @@ verified.
    `pixi run pdf2html prepare --item "Exact paper title"`.
 3. Compare the source PDF, MinerU blocks, `layout_report.json` (including every
    entry in `heading_outline`), and the reported source-only layout preview at
-   desktop and mobile widths. Confirm that the metadata title is the only H1,
+   desktop and 1024 CSS px tablet-landscape widths. Confirm that the metadata
+   title is the only H1,
    body sections begin at H2, and subsections do not skip levels. Do not edit
    preview or final HTML.
 4. If deterministic normalization is insufficient, create
@@ -43,7 +52,7 @@ verified.
 9. Run `pixi run pdf2html build --job <job-id>` and then
    `pixi run pdf2html verify --job <job-id>`.
 10. Render representative PDF pages and inspect the final page at desktop and
-   mobile widths. Fix defects before reporting completion.
+   1024 CSS px tablet-landscape widths. Fix defects before reporting completion.
 
 For a collection or tag, finish papers sequentially. A failure in one paper
 must not discard completed jobs. Reuse existing parse and translation artifacts

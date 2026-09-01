@@ -834,8 +834,11 @@ def test_composite_figure_and_page_notes_are_normalized(tmp_path: Path) -> None:
     css = (tmp_path / "preview" / "assets" / "app.css").read_text(
         encoding="utf-8"
     )
-    assert ".figure-members { grid-template-columns: minmax(0, 1fr) !important; }" in css
-    assert "@media (min-width: 641px)" in css
+    assert ".figure-members { grid-template-columns: minmax(0, 1fr) !important; }" not in css
+    assert "@media (min-width: 641px)" not in css
+    assert "@media (max-width: 640px)" not in css
+    assert "@media (max-width: 980px)" in css
+    assert ".reader-controls button[data-font]" not in css
     assert "font-size: clamp(2.1rem, 4.1vw, 3.2rem);" in css
     assert "padding: clamp(1.5rem, 3.2vw, 2.5rem);" in css
     assert ".source-only.reference {" in css

@@ -127,35 +127,36 @@ button { color: inherit; }
   font-size: var(--reader-size);
 }
 .paper-hero {
-  margin-bottom: 3.2rem;
-  padding: clamp(1.6rem, 5vw, 4rem);
+  margin-bottom: 2.25rem;
+  padding: clamp(1.5rem, 3.2vw, 2.5rem);
   border: 1px solid var(--line);
   border-radius: 28px;
   background: var(--surface);
   box-shadow: var(--shadow);
 }
+.paper-hero > .eyebrow { margin-bottom: .55rem; }
 .paper-hero h1 {
   margin: 0;
   font-family: "Noto Serif CJK SC", "Source Han Serif SC", SimSun, serif;
-  font-size: clamp(2.1rem, 5.5vw, 4.4rem);
+  font-size: clamp(2.1rem, 4.1vw, 3.2rem);
   line-height: 1.15;
   letter-spacing: -.035em;
 }
 .original-title {
-  margin: 1.25rem 0 1.5rem;
+  margin: .75rem 0 1rem;
   color: var(--source);
   font: 1.08em/1.45 Georgia, "Times New Roman", serif;
 }
-.byline { font-weight: 650; }
-.paper-meta { display: flex; flex-wrap: wrap; gap: .8rem 1.5rem; margin: 1.4rem 0 0; }
+.byline { margin: .75rem 0 0; font-weight: 650; }
+.paper-meta { display: flex; flex-wrap: wrap; gap: .45rem .9rem; margin: .75rem 0 0; }
 .paper-meta div { display: flex; gap: .45rem; }
 .paper-meta dt { color: var(--muted); }
 .paper-meta dd { margin: 0; }
 .paper-front-notes {
   display: grid;
-  gap: .45rem;
-  margin-top: 1.25rem;
-  padding-top: 1rem;
+  gap: .35rem;
+  margin-top: .9rem;
+  padding-top: .75rem;
   border-top: 1px solid var(--line);
   color: var(--muted);
   font-size: .8rem;
@@ -359,40 +360,11 @@ math { font-family: "Cambria Math", "STIX Two Math", serif; }
 .card-authors { color: var(--muted); font-size: .85rem; }
 .paper-card[hidden] { display: none; }
 
-@media (min-width: 641px) {
-  .paper-hero {
-    margin-bottom: 2.25rem;
-    padding: clamp(1.5rem, 3.2vw, 2.5rem);
-  }
-  .paper-hero > .eyebrow { margin-bottom: .55rem; }
-  .paper-hero h1 { font-size: clamp(2.1rem, 4.1vw, 3.2rem); }
-  .original-title { margin: .75rem 0 1rem; }
-  .byline { margin: .75rem 0 0; }
-  .paper-meta { gap: .45rem .9rem; margin: .75rem 0 0; }
-  .paper-front-notes { gap: .35rem; margin-top: .9rem; padding-top: .75rem; }
-}
-
 @media (max-width: 980px) {
   .reader-layout { display: block; padding-top: 2rem; }
   .toc-panel { position: static; max-height: none; margin: 0 auto 2rem; width: min(100%, 820px); }
   .toc-panel nav { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
   .page-marker { position: static; display: block; margin-top: .4rem; }
-}
-
-@media (max-width: 640px) {
-  .reader-bar { grid-template-columns: auto 1fr; padding: .45rem .7rem; }
-  .reader-controls { justify-self: end; gap: .2rem; }
-  .reader-controls button { min-height: 34px; padding: .25rem .5rem; font-size: .78rem; }
-  .reader-controls button[data-font] { display: none; }
-  .reader-layout { padding: 1.2rem .75rem 5rem; }
-  .toc-panel { display: none; }
-  .paper-hero { padding: 1.4rem; border-radius: 18px; }
-  .paper-hero h1 { font-size: 2rem; }
-  .paper-meta { display: grid; gap: .35rem; }
-  .pair > .source { font-size: .9em; }
-  figure, .table-block, .source-only { margin-right: -.25rem; margin-left: -.25rem; padding: .8rem; border-radius: 12px; }
-  .figure-members { grid-template-columns: minmax(0, 1fr) !important; }
-  .equation-layout { --equation-number-gutter: 2.4rem; }
 }
 
 @media print {
