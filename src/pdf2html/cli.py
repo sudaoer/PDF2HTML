@@ -29,7 +29,7 @@ from .models import (
     migrate_job_manifest,
 )
 from .render import build_layout_preview, build_paper
-from .server import ServerError, create_app
+from .server import ServerError, create_app, verify_http_app
 from .translations import (
     TranslationError,
     load_translations,
@@ -549,6 +549,11 @@ def verify(
             _job_dir(job) / "verification.json",
             bundle_path=_root() / manifest.bundle_path,
         )
+        report["http"] = verify_http_app(
+            library_root=_root() / "output" / "library",
+            paper_id=(_root() / manifest.bundle_path).parent.name,
+        )
+        atomic_write_json(_job_dir(job) / "verification.json", report)
         manifest.status = "verified"
         _save_manifest(manifest)
         typer.echo(json.dumps(report, ensure_ascii=False, indent=2))
@@ -558,6 +563,7 @@ def verify(
         TranslationError,
         VerificationError,
         OSError,
+        ServerError,
         ValueError,
     ) as exc:
         typer.echo(f"ERROR: {exc}", err=True)

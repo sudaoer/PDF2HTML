@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import PaperBlock from "./PaperBlock.vue";
 import { renderRich } from "./rendering";
-import type { PaperBundle, SearchResponse, ShelfResponse } from "./types";
+import type { PaperBundle, SearchResponse, SearchResult, ShelfResponse } from "./types";
 
 type Mode = "bilingual" | "target" | "source";
 
@@ -23,6 +23,7 @@ const shelf = ref<ShelfResponse | null>(null);
 const bundle = ref<PaperBundle | null>(null);
 const query = ref("");
 const matches = ref<string[] | null>(null);
+const searchResults = ref<SearchResult[]>([]);
 const mode = ref<Mode>("bilingual");
 const readerSize = ref(18);
 const theme = ref(savedTheme());
@@ -88,6 +89,7 @@ async function search(): Promise<void> {
   searchController?.abort();
   if (!value) {
     matches.value = null;
+    searchResults.value = [];
     return;
   }
   searchController = new AbortController();
@@ -96,6 +98,7 @@ async function search(): Promise<void> {
       `/api/search?q=${encodeURIComponent(value)}&limit=50`,
       searchController.signal,
     );
+    searchResults.value = response.results;
     matches.value = [...new Set(response.results.map((item) => item.paper_id))];
   } catch (reason) {
     if (!(reason instanceof DOMException && reason.name === "AbortError")) {
@@ -152,6 +155,21 @@ onBeforeUnmount(() => {
         <input v-model="query" type="search" placeholder="标题、作者、年份、标签或正文">
       </label>
     </header>
+    <section v-if="query" class="search-results" aria-live="polite">
+      <article v-for="result in searchResults" :key="`${result.paper_id}:${result.block_id}`" class="search-hit">
+        <p class="paper-year">
+          {{ result.page ? `PDF ${result.page}` : "论文信息" }} · {{ result.kind }}
+        </p>
+        <h2>
+          <a :href="`/papers/${result.paper_id}/${result.block_id ? `#${result.block_id}` : ''}`">
+            {{ result.title_zh }}
+          </a>
+        </h2>
+        <p v-if="result.target_excerpt" lang="zh-CN">{{ result.target_excerpt }}</p>
+        <p v-if="result.source_excerpt" class="card-original" lang="en">{{ result.source_excerpt }}</p>
+      </article>
+      <p v-if="!searchResults.length" class="empty-state">没有匹配的内容。</p>
+    </section>
     <section class="paper-grid" aria-live="polite">
       <article v-for="paper in visiblePapers" :key="paper.paper_id" class="paper-card">
         <p class="paper-year">{{ paper.date }}</p>

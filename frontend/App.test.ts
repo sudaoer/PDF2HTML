@@ -110,4 +110,50 @@ describe("application routes", () => {
     await chinese?.trigger("click");
     expect(wrapper.find(".paper-page").classes()).toContain("mode-target");
   });
+
+  it("renders HTTP search excerpts without interpreting markup", async () => {
+    history.pushState({}, "", "/");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((input: string) => {
+        if (input.startsWith("/api/search")) {
+          return Promise.resolve(
+            jsonResponse({
+              query: "route",
+              library_revision: "sha256:test",
+              results: [
+                {
+                  paper_id: "safe-paper",
+                  bundle_revision: "sha256:test",
+                  kind: "paragraph",
+                  block_id: "b1",
+                  segment_id: "b1.text",
+                  page: 2,
+                  title: "English title",
+                  title_zh: "中文标题",
+                  source_excerpt: "<img src=x onerror=alert(1)>",
+                  target_excerpt: "安全摘要",
+                  score: 1,
+                },
+              ],
+            }),
+          );
+        }
+        return Promise.resolve(
+          jsonResponse({
+            schema_version: 1,
+            library_revision: "sha256:test",
+            papers: [],
+            errors: [],
+          }),
+        );
+      }),
+    );
+    const wrapper = mount(App);
+    await flushPromises();
+    await wrapper.find("input[type='search']").setValue("route");
+    await flushPromises();
+    expect(wrapper.find(".search-hit").text()).toContain("<img src=x");
+    expect(wrapper.find(".search-hit img").exists()).toBe(false);
+  });
 });

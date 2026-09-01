@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 
 from .bundle import PaperBundle, bundle_shelf_record
 from .bundle_verify import BundleVerificationError, verify_bundle
+from .search import ENGLISH_WORD, SearchIndex
 from .util import canonical_json_bytes, hash_file, read_json
 
 PAPER_ID_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,126}[a-z0-9])?$")
@@ -67,6 +69,8 @@ class BundleRegistry:
         self.papers_root = self.library_root / "papers"
         self.entries: dict[str, BundleEntry] = {}
         self.broken: dict[str, BrokenBundle] = {}
+        self.search_index = SearchIndex()
+        self.lock = threading.RLock()
         self.library_revision = "sha256:" + "0" * 64
 
     @staticmethod
@@ -75,6 +79,10 @@ class BundleRegistry:
         return stat.st_mtime_ns, stat.st_size
 
     def refresh(self) -> None:
+        with self.lock:
+            self._refresh()
+
+    def _refresh(self) -> None:
         discovered: dict[str, tuple[Path, tuple[int, int]]] = {}
         if self.papers_root.is_dir():
             for paper_dir in self.papers_root.iterdir():
@@ -124,6 +132,9 @@ class BundleRegistry:
 
         digest = hashlib.sha256(canonical_json_bytes(revision_payload)).hexdigest()
         self.library_revision = f"sha256:{digest}"
+        self.search_index.sync(
+            {paper_id: entry.bundle for paper_id, entry in self.entries.items()}
+        )
 
     def shelf_payload(self) -> dict[str, Any]:
         records = [
@@ -149,38 +160,11 @@ class BundleRegistry:
         }
 
     def search_payload(self, query: str, limit: int) -> dict[str, Any]:
-        folded = query.casefold()
-        results: list[dict[str, Any]] = []
-        for paper in self.shelf_payload()["papers"]:
-            searchable = " ".join(
-                [
-                    str(paper.get("title", "")),
-                    str(paper.get("title_zh", "")),
-                    " ".join(str(item) for item in paper.get("creators", [])),
-                    str(paper.get("date", "")),
-                    " ".join(str(item) for item in paper.get("tags", [])),
-                ]
-            ).casefold()
-            if folded in searchable:
-                results.append(
-                    {
-                        "paper_id": paper["paper_id"],
-                        "bundle_revision": paper["bundle_revision"],
-                        "kind": "paper",
-                        "block_id": None,
-                        "segment_id": None,
-                        "page": None,
-                        "title": paper["title"],
-                        "title_zh": paper["title_zh"],
-                        "source_excerpt": paper["title"],
-                        "target_excerpt": paper["title_zh"],
-                        "score": 0.0,
-                    }
-                )
+        results = self.search_index.search(query, limit)
         return {
             "query": query,
             "library_revision": self.library_revision,
-            "results": results[:limit],
+            "results": results,
         }
 
 
@@ -370,3 +354,71 @@ def create_app(
         return FileResponse(candidate, headers=headers)
 
     return app
+
+
+def verify_http_app(
+    *,
+    library_root: Path,
+    paper_id: str,
+    web_root: Path | None = None,
+) -> dict[str, Any]:
+    from fastapi.testclient import TestClient
+
+    frontend = (web_root or (Path(__file__).parent / "web" / "dist")).resolve()
+    application = create_app(library_root=library_root, web_root=frontend)
+    client = TestClient(application)
+    checks: list[str] = []
+
+    shell = client.get("/")
+    if shell.status_code != 200:
+        raise ServerError(f"Vue shelf shell returned HTTP {shell.status_code}.")
+    checks.append("shelf_html")
+    shelf = client.get("/api/shelf")
+    if shelf.status_code != 200:
+        raise ServerError(f"Shelf API returned HTTP {shelf.status_code}.")
+    shelf_payload = shelf.json()
+    if paper_id not in {item["paper_id"] for item in shelf_payload["papers"]}:
+        raise ServerError(f"Shelf API did not discover {paper_id}.")
+    conditional = client.get(
+        "/api/shelf",
+        headers={"If-None-Match": shelf.headers["etag"]},
+    )
+    if conditional.status_code != 304 or conditional.content:
+        raise ServerError("Shelf conditional request did not return an empty 304.")
+    checks.extend(("shelf_json", "conditional_304"))
+
+    bundle_response = client.get(f"/papers/{paper_id}/paper.json")
+    if bundle_response.status_code != 200:
+        raise ServerError(f"Bundle JSON returned HTTP {bundle_response.status_code}.")
+    bundle = PaperBundle.model_validate(bundle_response.json())
+    for artifact in bundle.artifacts:
+        response = client.get(f"/papers/{paper_id}/{artifact.path}")
+        if response.status_code != 200:
+            raise ServerError(
+                f"Bundle artifact {artifact.path} returned HTTP {response.status_code}."
+            )
+    checks.append("markdown")
+    for item in {media.path: media for media in bundle.media}.values():
+        response = client.get(f"/papers/{paper_id}/{item.path}")
+        if response.status_code != 200 or len(response.content) != item.size:
+            raise ServerError(f"Bundle media {item.path} failed its HTTP check.")
+    checks.append("media")
+
+    asset_names = sorted(_vite_assets(frontend))
+    if not asset_names or client.get(f"/assets/{asset_names[0]}").status_code != 200:
+        raise ServerError("Vue assets are not available through the HTTP service.")
+    checks.append("assets")
+    query = ENGLISH_WORD.search(bundle.document.metadata.title)
+    if query is not None:
+        search = client.get("/api/search", params={"q": query.group(0), "limit": 10})
+        if search.status_code != 200 or paper_id not in {
+            item["paper_id"] for item in search.json()["results"]
+        }:
+            raise ServerError("Search API did not return the verified paper.")
+        checks.append("search")
+    return {
+        "status": "passed",
+        "paper_id": paper_id,
+        "library_revision": shelf_payload["library_revision"],
+        "checks": checks,
+    }

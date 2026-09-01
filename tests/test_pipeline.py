@@ -24,6 +24,7 @@ from pdf2html.models import (
     migrate_job_manifest,
 )
 from pdf2html.render import _parse_equation, build_paper, render_equation, render_markdown
+from pdf2html.search import SearchIndex, search_tokens
 from pdf2html.server import create_app
 from pdf2html.translations import (
     TranslationError,
@@ -351,6 +352,20 @@ def test_read_only_http_routes_and_incremental_corruption(tmp_path: Path) -> Non
     search = client.get("/api/search", params={"q": "Routing", "limit": 10})
     assert search.status_code == 200
     assert search.json()["results"][0]["paper_id"] == result.paper_id
+    first_search_etag = search.headers["etag"]
+
+    translations["meta.title"] = "新版路由网络"
+    build_bundle(
+        document,
+        translations,
+        content_list_path=content_path,
+        library_root=library_root,
+    )
+    changed_search = client.get("/api/search", params={"q": "Routing", "limit": 10})
+    assert changed_search.status_code == 200
+    assert changed_search.headers["etag"] != first_search_etag
+    assert changed_search.json()["results"][0]["paper_id"] == result.paper_id
+    assert client.get("/api/search", params={"q": "路由"}).json()["results"]
 
     damaged = read_json(result.bundle_path)
     assert isinstance(damaged, dict)
@@ -362,6 +377,32 @@ def test_read_only_http_routes_and_incremental_corruption(tmp_path: Path) -> Non
     shelf_after = client.get("/api/shelf").json()
     assert shelf_after["papers"] == []
     assert shelf_after["errors"][0]["paper_id"] == result.paper_id
+
+
+def test_bilingual_fts_tokens_weights_pages_and_limits(tmp_path: Path) -> None:
+    assert search_tokens("RouterNet 路由") == ["erouternet", "u路", "u由", "b路由"]
+    document, content_path = prepared_document(tmp_path)
+    translations = {segment.id: f"译文：{segment.source}" for segment in document.segments}
+    translations["meta.title"] = "路由网络"
+    paragraph = next(block for block in document.blocks if block.kind == "paragraph")
+    translations[paragraph.segment_id] = "路由精度为 $x^2$，如 [1] 所示。"
+    result = build_bundle(
+        document,
+        translations,
+        content_list_path=content_path,
+        library_root=tmp_path / "library",
+    )
+    bundle = PaperBundle.model_validate(read_json(result.bundle_path))
+    index = SearchIndex()
+    index.sync({bundle.paper_id: bundle})
+
+    title_results = index.search("Routing", 10)
+    assert title_results[0]["kind"] == "paper"
+    chinese_results = index.search("精度", 10)
+    assert chinese_results[0]["block_id"] == paragraph.id
+    assert chinese_results[0]["page"] == paragraph.page + 1
+    assert "路由精度" in chinese_results[0]["target_excerpt"]
+    assert len(index.search("路由", 1)) == 1
 
 
 @pytest.mark.parametrize(
