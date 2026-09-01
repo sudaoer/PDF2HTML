@@ -839,6 +839,10 @@ def test_composite_figure_and_page_notes_are_normalized(tmp_path: Path) -> None:
     assert ".source-only.reference {" in css
     assert "background: transparent;" in css
     assert "text-indent: -1.4em;" in css
+    divider_rule = css.split(".paper-body > * + *::before {", 1)[1].split("}", 1)[0]
+    assert "border-top: 1px solid var(--line);" in divider_rule
+    source_rule = css.split(".pair > .source {", 1)[1].split("}", 1)[0]
+    assert "border-top:" not in source_rule
 
 
 def test_conservative_grouping_leaves_distant_subfigures_for_review(tmp_path: Path) -> None:

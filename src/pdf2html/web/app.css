@@ -169,10 +169,17 @@ button { color: inherit; }
 .pair > .target { color: var(--ink); }
 .pair > .source {
   padding-top: .65rem;
-  border-top: 1px solid var(--line);
   color: var(--source);
   font-family: Georgia, "Times New Roman", serif;
   font-size: .93em;
+}
+.paper-body > * + *::before {
+  content: "";
+  position: absolute;
+  top: -.8rem;
+  right: 0;
+  left: 0;
+  border-top: 1px solid var(--line);
 }
 .pair p { margin: 0 0 .7rem; }
 .abstract {
