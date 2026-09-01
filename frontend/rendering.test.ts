@@ -46,9 +46,37 @@ describe("safe rendering", () => {
     expect(output).toContain("katex-error");
   });
 
-  it("allows only table structure for table blocks", () => {
-    const output = renderRich('<table><tr><td colspan="2">A</td></tr></table>', true);
-    expect(output).toContain("<table>");
-    expect(output).toContain('colspan="2"');
+  it("renders math inside sanitized table text nodes", () => {
+    const output = renderRich(
+      String.raw`<table><tr><th>Plain</th><th>$OR_{20}$ ↓</th><th>\(OR_{40}\)</th><th>$\textbf{\em F}$</th></tr></table>`,
+      true,
+    );
+    const container = document.createElement("div");
+    container.innerHTML = output;
+
+    expect(container.querySelectorAll("table .katex")).toHaveLength(3);
+    expect(container.textContent).toContain("Plain");
+    expect(container.textContent).toContain("↓");
+    expect(container.textContent).not.toContain("$OR_{20}$");
+    expect(output).not.toContain(String.raw`\em`);
+    expect(output).not.toContain("katex-error");
+  });
+
+  it("keeps the strict table allowlist while adding KaTeX", () => {
+    const output = renderRich(
+      '<table onclick="alert(1)"><tr><td rowspan="2" colspan="3" onmouseover="alert(2)">$x^2$<script>alert(3)</script><img src="x" onerror="alert(4)"></td><td><a href="https://example.com">link</a></td></tr></table>',
+      true,
+    );
+    const container = document.createElement("div");
+    container.innerHTML = output;
+    const cell = container.querySelector("td");
+
+    expect(container.querySelectorAll("table .katex")).toHaveLength(1);
+    expect(cell?.getAttribute("rowspan")).toBe("2");
+    expect(cell?.getAttribute("colspan")).toBe("3");
+    expect(container.querySelector("script, img, a")).toBeNull();
+    expect(output).not.toContain("onclick");
+    expect(output).not.toContain("onmouseover");
+    expect(output).not.toContain("onerror");
   });
 });

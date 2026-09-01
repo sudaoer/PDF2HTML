@@ -6,6 +6,10 @@ const markdown = new MarkdownIt({ html: false, linkify: false, typographer: fals
   "table",
 );
 const mathPattern = /(\$\$([\s\S]*?)\$\$|\\\[([\s\S]*?)\\\]|\\\((.*?)\\\)|(?<!\\)\$([^$\n]+?)\$)/g;
+const tableSanitizeConfig = {
+  ALLOWED_ATTR: ["colspan", "rowspan"],
+  ALLOWED_TAGS: ["table", "thead", "tbody", "tfoot", "tr", "th", "td"],
+};
 
 function latexGroup(value: string, start: number): [string, number] | null {
   if (start >= value.length || value[start] !== "{") return null;
@@ -91,13 +95,51 @@ function renderMath(source: string, displayMode: boolean): string {
   });
 }
 
+function renderMathText(value: string): DocumentFragment | null {
+  const pattern = new RegExp(mathPattern.source, mathPattern.flags);
+  const fragment = document.createDocumentFragment();
+  let cursor = 0;
+  let found = false;
+  for (const match of value.matchAll(pattern)) {
+    const index = match.index ?? 0;
+    const dollarDisplay = match[2];
+    const bracketDisplay = match[3];
+    const parenInline = match[4];
+    const dollarInline = match[5];
+    const display = dollarDisplay !== undefined || bracketDisplay !== undefined;
+    const source = dollarDisplay ?? bracketDisplay ?? parenInline ?? dollarInline ?? "";
+    const rendered = document.createElement("template");
+    rendered.innerHTML = DOMPurify.sanitize(renderMath(source, display));
+
+    found = true;
+    fragment.append(document.createTextNode(value.slice(cursor, index)));
+    fragment.append(rendered.content.cloneNode(true));
+    cursor = index + match[0].length;
+  }
+  if (!found) return null;
+  fragment.append(document.createTextNode(value.slice(cursor)));
+  return fragment;
+}
+
+function renderSafeTable(value: string): string {
+  const table = document.createElement("template");
+  table.innerHTML = DOMPurify.sanitize(value, tableSanitizeConfig);
+  const walker = document.createTreeWalker(table.content, NodeFilter.SHOW_TEXT);
+  const textNodes: Text[] = [];
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    textNodes.push(node as Text);
+  }
+  textNodes.forEach((node) => {
+    const replacement = renderMathText(node.data);
+    if (replacement) node.replaceWith(replacement);
+  });
+  return DOMPurify.sanitize(table.innerHTML);
+}
+
 export function renderRich(value: string, allowTable = false): string {
   if (!value.trim()) return "";
   if (allowTable && /<table[\s>]/i.test(value)) {
-    return DOMPurify.sanitize(value, {
-      ALLOWED_ATTR: ["colspan", "rowspan"],
-      ALLOWED_TAGS: ["table", "thead", "tbody", "tfoot", "tr", "th", "td"],
-    });
+    return renderSafeTable(value);
   }
   const replacements: string[] = [];
   const protectedText = value.replace(

@@ -29,7 +29,8 @@ function tableBlock(): DocumentBlock {
     kind: "table",
     page: 4,
     level: 0,
-    source: "<table><tr><td>Method</td></tr><tr><td>Source row</td></tr></table>",
+    source:
+      "<table><tr><td>Method</td><td>$OR_{20}$ ↓</td></tr><tr><td>Source row</td><td>1.72</td></tr></table>",
     segment_id: "table-1.table",
     asset: "images/table-1.png",
     caption_source: "Table 1: Results",
@@ -73,7 +74,7 @@ describe("table blocks", () => {
         paperId: "paper",
         translations: {
           [block.segment_id]:
-            "<table><tr><td>方法</td></tr><tr><td>中文行</td></tr></table>",
+            "<table><tr><td>方法</td><td>$OR_{20}$ ↓</td></tr><tr><td>中文行</td><td>1.72</td></tr></table>",
           [block.caption_segment_id]: "表 1：结果",
         },
         media: { [block.asset]: "media/table-1.png" },
@@ -82,6 +83,8 @@ describe("table blocks", () => {
 
     expect(wrapper.findAll("table")).toHaveLength(1);
     expect(wrapper.find("table").text()).toContain(expected);
+    expect(wrapper.findAll(".table-scroll .katex")).toHaveLength(1);
+    expect(wrapper.find(".table-scroll").text()).not.toContain("$OR_{20}$");
     expect(wrapper.find(".table-scroll").attributes("lang")).toBe(language);
     expect(wrapper.find(".table-fallback").exists()).toBe(false);
     expect(wrapper.findAll("img")).toHaveLength(0);
@@ -96,7 +99,7 @@ describe("table blocks", () => {
         paperId: "paper",
         translations: {
           [block.segment_id]:
-            "<table><tr><td>方法</td></tr><tr><td>中文行</td></tr></table>",
+            "<table><tr><td>方法</td><td>$OR_{20}$ ↓</td></tr><tr><td>中文行</td><td>1.72</td></tr></table>",
           [block.caption_segment_id]: "表 1：结果",
         },
         media: { [block.asset]: "media/table-1.png" },
