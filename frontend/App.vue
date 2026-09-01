@@ -253,8 +253,8 @@ onBeforeUnmount(() => {
             </dl>
             <section v-if="bundle.document.front_matter_notes.length" class="paper-front-notes">
               <div v-for="note in bundle.document.front_matter_notes" :key="note.id" class="front-note pair">
-                <div class="target" lang="zh-CN">{{ translations[note.segment_id] || note.source }}</div>
-                <div class="source" lang="en">{{ note.source }}</div>
+                <div class="target" lang="zh-CN"><sup v-if="note.marker">{{ note.marker }}</sup><span v-html="renderRich(translations[note.segment_id] || note.source)" /></div>
+                <div class="source" lang="en"><sup v-if="note.marker">{{ note.marker }}</sup><span v-html="renderRich(note.source)" /></div>
               </div>
             </section>
           </header>

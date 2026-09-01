@@ -159,6 +159,29 @@ def _repair_adjacent_captions(entries: list[dict[str, Any]]) -> list[dict[str, A
 
 FLOAT_KINDS = {"figure", "figure_group", "table"}
 TERMINAL_PUNCTUATION = re.compile(r"[.!?。！？:：;；]['\"”’)]*$")
+SUBFIGURE_LABEL_RUN = re.compile(r"^\s*(?:\([a-z]\)\s*){2,}$", re.IGNORECASE)
+TRAILING_SUBFIGURE_LABEL = re.compile(
+    r"^(?P<body>.+\S)\s*(?P<label>\([a-z]\))\s*$",
+    re.IGNORECASE | re.DOTALL,
+)
+FIGURE_NUMBER = re.compile(
+    r"\b(?:Figure|Fig\.)\s+(\d+)(?=\s*(?:[.:]|\b))",
+    re.IGNORECASE,
+)
+BARE_FIRST_SUBFIGURE = re.compile(
+    r"^\s*(?:(?:predicted|ground[- ]?truth)\s+label\s*)?a\s*$",
+    re.IGNORECASE,
+)
+BARE_SUBFIGURE_ONLY = re.compile(r"^\s*([a-z])\s*$", re.IGNORECASE)
+BARE_SUBFIGURE_WITH_CAPTION = re.compile(
+    r"^\s*([a-z])\s*((?:Figure|Fig\.)\s+\d+\b.*)$",
+    re.IGNORECASE | re.DOTALL,
+)
+ARRAY_TRAILING_TAG = re.compile(
+    r"(?P<prefix>\\begin\{array\}(?:\{[^{}]*\})?[\s\S]*?)"
+    r"\\tag\s*\{(?P<label>[^{}]+)\}\s*\\\\\s*"
+    r"(?P<end>\\end\{array\})\s*$"
+)
 
 
 def _valid_bbox(block: DocumentBlock) -> bool:
@@ -278,6 +301,183 @@ def _merge_boundary_paragraphs(
     return merged_blocks, merge_groups
 
 
+def _repair_displaced_figure_captions(
+    blocks: list[DocumentBlock],
+) -> tuple[list[DocumentBlock], int]:
+    """Repair one conservative multi-figure caption displacement pattern.
+
+    Some MinerU VLM outputs keep an upper two-panel figure as one image whose
+    caption contains only ``(a)(b)``.  The real caption is then prepended to the
+    lower row's ``(a)`` panel, while the lower ``(b)`` panel carries the next
+    consecutively numbered figure caption.  Rebind the first caption only when
+    labels, numbering, page, row geometry, and horizontal span all agree.
+    """
+    repaired = [block.model_copy(deep=True) for block in blocks]
+    repair_count = 0
+    index = 0
+    while index + 2 < len(repaired):
+        upper, lower_left, lower_right = repaired[index : index + 3]
+        if any(block.kind != "figure" for block in (upper, lower_left, lower_right)):
+            index += 1
+            continue
+        if len({block.page for block in (upper, lower_left, lower_right)}) != 1:
+            index += 1
+            continue
+        if not all(_valid_bbox(block) for block in (upper, lower_left, lower_right)):
+            index += 1
+            continue
+        if SUBFIGURE_LABEL_RUN.fullmatch(upper.caption_source) is None:
+            index += 1
+            continue
+        upper_labels = re.findall(r"\([a-z]\)", upper.caption_source.casefold())
+        if upper_labels != ["(a)", "(b)"]:
+            index += 1
+            continue
+        trailing = TRAILING_SUBFIGURE_LABEL.fullmatch(lower_left.caption_source)
+        if trailing is None or trailing.group("label").casefold() != "(a)":
+            index += 1
+            continue
+        right_label, right_caption = _subfigure_parts(lower_right)
+        if right_label != "(b)" or not right_caption:
+            index += 1
+            continue
+        displaced_caption = trailing.group("body").strip()
+        displaced_number = FIGURE_NUMBER.search(displaced_caption)
+        following_number = FIGURE_NUMBER.search(right_caption)
+        if (
+            displaced_number is None
+            or following_number is None
+            or int(following_number.group(1)) != int(displaced_number.group(1)) + 1
+        ):
+            index += 1
+            continue
+        if not _horizontal_neighbors(lower_left, lower_right):
+            index += 1
+            continue
+        if upper.bbox[3] > min(lower_left.bbox[1], lower_right.bbox[1]):
+            index += 1
+            continue
+        lower_left_edge = min(lower_left.bbox[0], lower_right.bbox[0])
+        lower_right_edge = max(lower_left.bbox[2], lower_right.bbox[2])
+        overlap = max(
+            0.0,
+            min(upper.bbox[2], lower_right_edge)
+            - max(upper.bbox[0], lower_left_edge),
+        )
+        narrower_span = min(
+            upper.bbox[2] - upper.bbox[0],
+            lower_right_edge - lower_left_edge,
+        )
+        if narrower_span <= 0 or overlap / narrower_span < 0.8:
+            index += 1
+            continue
+
+        upper.caption_source = displaced_caption
+        upper.extra["automatic_caption_repair"] = True
+        upper.extra["caption_repaired_from_id"] = lower_left.id
+        lower_left.caption_source = "(a)"
+        lower_left.extra["automatic_caption_repair"] = True
+        lower_left.extra["caption_reassigned_to"] = upper.id
+        repair_count += 1
+        index += 3
+    return repaired, repair_count
+
+
+def _repair_bare_subfigure_labels(
+    blocks: list[DocumentBlock],
+) -> tuple[list[DocumentBlock], int]:
+    """Normalize a conservative bare-label figure run to ``(a)`` ... ``(n)``.
+
+    Journal figures are sometimes emitted as consecutive panel crops whose
+    captions are bare letters, with the final crop carrying ``fFig. 4 ...``.
+    Accept only a same-page, geometrically ordered run beginning at ``a`` and
+    ending in a numbered figure caption.  A common axis label accidentally
+    attached to the first panel is tolerated only for predicted/ground-truth
+    labels.
+    """
+    repaired = [block.model_copy(deep=True) for block in blocks]
+    repair_count = 0
+    index = 0
+    while index < len(repaired):
+        first = repaired[index]
+        if (
+            first.kind != "figure"
+            or BARE_FIRST_SUBFIGURE.fullmatch(first.caption_source) is None
+            or not _valid_bbox(first)
+        ):
+            index += 1
+            continue
+
+        run = [first]
+        full_caption = ""
+        cursor = index + 1
+        expected_code = ord("b")
+        while cursor < len(repaired):
+            candidate = repaired[cursor]
+            if (
+                candidate.kind != "figure"
+                or candidate.page != first.page
+                or not _valid_bbox(candidate)
+            ):
+                break
+            bare = BARE_SUBFIGURE_ONLY.fullmatch(candidate.caption_source)
+            with_caption = BARE_SUBFIGURE_WITH_CAPTION.fullmatch(
+                candidate.caption_source
+            )
+            match = with_caption or bare
+            if match is None or match.group(1).casefold() != chr(expected_code):
+                break
+            previous = run[-1]
+            same_row = _horizontal_neighbors(previous, candidate)
+            new_row = (
+                candidate.bbox[1] > previous.bbox[1]
+                and candidate.bbox[0] <= previous.bbox[0]
+            )
+            if not same_row and not new_row:
+                break
+            run.append(candidate)
+            cursor += 1
+            expected_code += 1
+            if with_caption is not None:
+                full_caption = with_caption.group(2).strip()
+                break
+
+        if len(run) < 2 or not full_caption or FIGURE_NUMBER.search(full_caption) is None:
+            index += 1
+            continue
+
+        for offset, block in enumerate(run):
+            label = f"({chr(ord('a') + offset)})"
+            block.caption_source = (
+                f"{label}{full_caption}" if block is run[-1] else label
+            )
+            block.extra["automatic_bare_subfigure_label_repair"] = True
+        repair_count += 1
+        index = cursor
+    return repaired, repair_count
+
+
+def _repair_equation_tags(
+    blocks: list[DocumentBlock],
+) -> tuple[list[DocumentBlock], int]:
+    """Move a trailing equation tag outside a MinerU array environment."""
+    repaired = [block.model_copy(deep=True) for block in blocks]
+    repair_count = 0
+    for block in repaired:
+        if block.kind != "equation":
+            continue
+        match = ARRAY_TRAILING_TAG.fullmatch(block.source.strip())
+        if match is None:
+            continue
+        block.source = (
+            f"{match.group('prefix').rstrip()} "
+            f"{match.group('end')}\\tag{{{match.group('label').strip()}}}"
+        )
+        block.extra["automatic_equation_tag_repair"] = True
+        repair_count += 1
+    return repaired, repair_count
+
+
 def _content_entries(payload: Any) -> list[dict[str, Any]]:
     if isinstance(payload, list):
         if payload and all(isinstance(page, list) for page in payload):
@@ -325,13 +525,20 @@ def build_document(
 ) -> Document:
     entries = _content_entries(read_json(content_list_path))
     primitive_blocks = _primitive_blocks(entries)
+    primitive_blocks, equation_tag_repair_count = _repair_equation_tags(primitive_blocks)
     heading_blocks, heading_info = normalize_heading_structure(
         primitive_blocks,
         metadata=metadata,
         middle_json_path=middle_json_path,
     )
     nonempty_blocks, empty_count = _drop_empty_blocks(heading_blocks)
-    grouped_blocks, group_count = _group_adjacent_figures(nonempty_blocks)
+    repaired_blocks, caption_repair_count = _repair_displaced_figure_captions(
+        nonempty_blocks
+    )
+    label_repaired_blocks, bare_label_repair_count = _repair_bare_subfigure_labels(
+        repaired_blocks
+    )
+    grouped_blocks, group_count = _group_adjacent_figures(label_repaired_blocks)
     override_targets = [
         {
             "id": block.id,
@@ -364,6 +571,9 @@ def build_document(
         layout_info={
             "content_sha256": content_sha256,
             "automatic_figure_groups": group_count,
+            "automatic_caption_repairs": caption_repair_count,
+            "automatic_bare_subfigure_label_repairs": bare_label_repair_count,
+            "automatic_equation_tag_repairs": equation_tag_repair_count,
             "automatic_paragraph_merges": paragraph_merge_count,
             "dropped_empty_blocks": empty_count,
             "overrides_applied": override_count,
@@ -573,7 +783,11 @@ def _group_adjacent_figures(
     return grouped, group_count
 
 
-NOTE_MARKER = re.compile(r"^\s*<sup>([^<]+)</sup>\s*", re.IGNORECASE)
+NOTE_MARKER = re.compile(
+    r"^\s*(?:<sup>(?P<html>[^<]+)</sup>|"
+    r"\$\^\{(?P<latex>[^{}]+)\}\$|(?P<plain>[*†‡]))\s*",
+    re.IGNORECASE,
+)
 PURE_URL = re.compile(r"^(?:https?://|www\.)\S+$", re.IGNORECASE)
 
 
@@ -588,7 +802,11 @@ def _extract_notes(
             body.append(block)
             continue
         match = NOTE_MARKER.match(block.source)
-        marker = match.group(1).strip() if match else ""
+        marker = (
+            next(group for group in match.groups() if group is not None).strip()
+            if match
+            else ""
+        )
         note_source = block.source[match.end() :].strip() if match else block.source.strip()
         folded = note_source.casefold()
         forced_front = block.kind == "front_note"
@@ -601,6 +819,7 @@ def _extract_notes(
             and (
                 marker in {"*", "†", "‡"}
                 or "contributed equally" in folded
+                or "equal contribution" in folded
                 or "corresponding author" in folded
             )
         )

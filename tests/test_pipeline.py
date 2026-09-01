@@ -877,6 +877,266 @@ def test_conservative_grouping_leaves_distant_subfigures_for_review(tmp_path: Pa
     assert any("orphaned subfigure" in error for error in report["errors"])
 
 
+def test_nearby_split_subfigure_label_is_resolved_by_full_caption(
+    tmp_path: Path,
+) -> None:
+    payload = [
+        {
+            "type": "image",
+            "img_path": "images/a.png",
+            "caption": "(a)",
+            "page_idx": 0,
+            "bbox": [100, 100, 220, 220],
+        },
+        {
+            "type": "image",
+            "img_path": "images/detail.png",
+            "caption": "IoU=0.81",
+            "page_idx": 0,
+            "bbox": [240, 100, 360, 220],
+        },
+        {
+            "type": "image",
+            "img_path": "images/b.png",
+            "caption": "(b)Fig. 2. Split export with (a) overview and (b) examples.",
+            "page_idx": 0,
+            "bbox": [380, 100, 500, 220],
+        },
+    ]
+    path = tmp_path / "nearby-split.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    document = build_document(
+        job_id="nearby-split-job",
+        metadata=PaperMetadata(title="Nearby split"),
+        source=source_reference(),
+        content_list_path=path,
+    )
+    report = structure_report(document)
+    assert report["status"] == "passed"
+    assert not any("orphaned subfigure" in error for error in report["errors"])
+
+
+def test_repairs_displaced_caption_before_manual_subfigure_grouping(
+    tmp_path: Path,
+) -> None:
+    images = tmp_path / "images"
+    images.mkdir()
+    for name in ("figure-7.png", "figure-8a.png", "figure-8b.png"):
+        (images / name).write_bytes(b"\x89PNG\r\n\x1a\nfixture")
+    payload = [
+        {
+            "type": "image",
+            "img_path": "images/figure-7.png",
+            "caption": "(a)(b)",
+            "page_idx": 0,
+            "bbox": [100, 100, 500, 220],
+        },
+        {
+            "type": "image",
+            "img_path": "images/figure-8a.png",
+            "caption": "Fig. 7. Model-size analysis.(a)",
+            "page_idx": 0,
+            "bbox": [100, 260, 300, 380],
+        },
+        {
+            "type": "image",
+            "img_path": "images/figure-8b.png",
+            "caption": "(b)Fig. 8. Rank sensitivity analysis.",
+            "page_idx": 0,
+            "bbox": [300, 260, 500, 380],
+        },
+    ]
+    path = tmp_path / "displaced-caption.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    first_pass = build_document(
+        job_id="caption-repair-job",
+        metadata=PaperMetadata(title="Caption repair"),
+        source=source_reference(),
+        content_list_path=path,
+        content_sha256=hash_file(path),
+    )
+    assert first_pass.layout_info["automatic_caption_repairs"] == 1
+    assert first_pass.blocks[0].caption_source == "Fig. 7. Model-size analysis."
+    assert first_pass.blocks[1].caption_source == "(a)"
+    assert first_pass.blocks[2].caption_source == "(b)Fig. 8. Rank sensitivity analysis."
+
+    overrides = LayoutOverrides(
+        job_id="caption-repair-job",
+        source_sha256="a" * 64,
+        content_sha256=hash_file(path),
+        operations=[
+            LayoutOperation(
+                op="group",
+                targets=[target_for(block) for block in first_pass.blocks[1:]],
+                caption_from=first_pass.blocks[2].id,
+                layout="row",
+                reason="Confirmed against the source PDF.",
+            )
+        ],
+    )
+    document = build_document(
+        job_id="caption-repair-job",
+        metadata=PaperMetadata(title="Caption repair"),
+        source=source_reference(),
+        content_list_path=path,
+        content_sha256=hash_file(path),
+        overrides=overrides,
+    )
+    assert [block.kind for block in document.blocks] == ["figure", "figure_group"]
+    assert document.blocks[0].caption_source == "Fig. 7. Model-size analysis."
+    assert document.blocks[1].caption_source == "Fig. 8. Rank sensitivity analysis."
+
+
+def test_latex_and_plain_author_note_markers_are_extracted(tmp_path: Path) -> None:
+    payload = [
+        {
+            "type": "page_footnote",
+            "text": "$^{1}$  Equal contribution.",
+            "page_idx": 0,
+        },
+        {
+            "type": "page_footnote",
+            "text": "* Corresponding authors.",
+            "page_idx": 0,
+        },
+    ]
+    path = tmp_path / "author-notes.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    document = build_document(
+        job_id="author-notes-job",
+        metadata=PaperMetadata(title="Author notes"),
+        source=source_reference(),
+        content_list_path=path,
+    )
+    assert not document.blocks
+    assert not document.endnotes
+    assert [note.marker for note in document.front_matter_notes] == ["1", "*"]
+    assert [note.source for note in document.front_matter_notes] == [
+        "Equal contribution.",
+        "Corresponding authors.",
+    ]
+
+
+def test_repairs_and_groups_bare_subfigure_grid_in_reviewed_order(
+    tmp_path: Path,
+) -> None:
+    images = tmp_path / "images"
+    images.mkdir()
+    names = [f"panel-{label}.png" for label in "abcdef"]
+    for name in names:
+        (images / name).write_bytes(b"\x89PNG\r\n\x1a\nfixture")
+    captions = [
+        "Predicted labela",
+        "b",
+        "C",
+        "d",
+        "e",
+        "fFig. 4 Grid comparison. a Model. b-e Experts. f Accuracy.",
+    ]
+    bboxes = [
+        [100, 100, 250, 220],
+        [260, 100, 410, 220],
+        [100, 240, 250, 360],
+        [260, 240, 410, 360],
+        [100, 380, 250, 500],
+        [260, 380, 410, 500],
+    ]
+    payload = [
+        {
+            "type": "image",
+            "img_path": f"images/{name}",
+            "caption": caption,
+            "page_idx": 0,
+            "bbox": bbox,
+        }
+        for name, caption, bbox in zip(names, captions, bboxes, strict=True)
+    ]
+    path = tmp_path / "bare-grid.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    first_pass = build_document(
+        job_id="bare-grid-job",
+        metadata=PaperMetadata(title="Bare grid"),
+        source=source_reference(),
+        content_list_path=path,
+        content_sha256=hash_file(path),
+    )
+    assert first_pass.layout_info["automatic_bare_subfigure_label_repairs"] == 1
+    assert [block.caption_source for block in first_pass.blocks[:-1]] == [
+        "(a)",
+        "(b)",
+        "(c)",
+        "(d)",
+        "(e)",
+    ]
+    assert first_pass.blocks[-1].caption_source.startswith("(f)Fig. 4")
+
+    overrides = LayoutOverrides(
+        job_id="bare-grid-job",
+        source_sha256="a" * 64,
+        content_sha256=hash_file(path),
+        operations=[
+            LayoutOperation(
+                op="group",
+                targets=[target_for(block) for block in first_pass.blocks],
+                caption_from=first_pass.blocks[-1].id,
+                layout="grid",
+                reason="Confirmed row-major panel order against the source PDF.",
+            )
+        ],
+    )
+    document = build_document(
+        job_id="bare-grid-job",
+        metadata=PaperMetadata(title="Bare grid"),
+        source=source_reference(),
+        content_list_path=path,
+        content_sha256=hash_file(path),
+        overrides=overrides,
+    )
+    assert [block.kind for block in document.blocks] == ["figure_group"]
+    group = document.blocks[0]
+    assert group.layout == "grid"
+    assert [member.id for member in group.members] == [
+        "b0001",
+        "b0002",
+        "b0003",
+        "b0004",
+        "b0005",
+        "b0006",
+    ]
+    assert [member.label for member in group.members] == [
+        "(a)",
+        "(b)",
+        "(c)",
+        "(d)",
+        "(e)",
+        "(f)",
+    ]
+    assert group.caption_source.startswith("Fig. 4 Grid comparison.")
+
+
+def test_moves_trailing_equation_tag_outside_array(tmp_path: Path) -> None:
+    payload = [
+        {
+            "type": "equation",
+            "text": r"\begin{array}{l} x = 1 \tag {12} \\ \end{array}",
+            "page_idx": 0,
+            "bbox": [10, 10, 100, 40],
+        }
+    ]
+    path = tmp_path / "array-tag.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    document = build_document(
+        job_id="array-tag-job",
+        metadata=PaperMetadata(title="Array tag"),
+        source=source_reference(),
+        content_list_path=path,
+    )
+    equation = document.blocks[0]
+    assert equation.kind == "equation"
+    assert equation.source == r"\begin{array}{l} x = 1 \end{array}\tag{12}"
+    assert document.layout_info["automatic_equation_tag_repairs"] == 1
+
+
 def target_for(block: DocumentBlock) -> LayoutTarget:
     return LayoutTarget(
         id=block.id,

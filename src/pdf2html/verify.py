@@ -6,11 +6,53 @@ from typing import Any
 
 from .bundle_verify import BundleVerificationError, verify_bundle
 from .headings import is_front_matter_duplicate
-from .models import Document
+from .models import Document, DocumentBlock
 from .util import atomic_write_json
 
 SUBFIGURE_ONLY = re.compile(r"^\s*\([a-z]\)\s*$", re.IGNORECASE)
+FIGURE_CAPTION = re.compile(r"\b(?:Figure|Fig\.)\s+\d+\b", re.IGNORECASE)
 TEXT_KINDS = {"paragraph", "heading", "list", "aside", "page_footnote"}
+
+
+def _nearby_figure(left: DocumentBlock, right: DocumentBlock) -> bool:
+    left_bbox = left.bbox
+    right_bbox = right.bbox
+    if len(left_bbox) != 4 or len(right_bbox) != 4:
+        return False
+    left_width = max(left_bbox[2] - left_bbox[0], 0.0)
+    right_width = max(right_bbox[2] - right_bbox[0], 0.0)
+    left_height = max(left_bbox[3] - left_bbox[1], 0.0)
+    right_height = max(right_bbox[3] - right_bbox[1], 0.0)
+    if min(left_width, right_width, left_height, right_height) <= 0:
+        return False
+    horizontal_gap = max(
+        0.0,
+        max(left_bbox[0], right_bbox[0]) - min(left_bbox[2], right_bbox[2]),
+    )
+    vertical_gap = max(
+        0.0,
+        max(left_bbox[1], right_bbox[1]) - min(left_bbox[3], right_bbox[3]),
+    )
+    return (
+        horizontal_gap <= 2.0 * max(left_width, right_width)
+        and vertical_gap <= 1.5 * max(left_height, right_height)
+    )
+
+
+def _subfigure_label_has_nearby_caption(document: Document, index: int) -> bool:
+    block = document.blocks[index]
+    label = block.caption_source.strip().casefold()
+    for candidate in document.blocks[index + 1 : index + 9]:
+        if candidate.kind != "figure" or candidate.page != block.page:
+            break
+        caption = candidate.caption_source.strip()
+        if (
+            FIGURE_CAPTION.search(caption)
+            and label in caption.casefold()
+            and _nearby_figure(block, candidate)
+        ):
+            return True
+    return False
 
 
 def structure_report(
@@ -32,7 +74,7 @@ def structure_report(
     if len(segment_ids) != len(set(segment_ids)):
         errors.append("Document segment IDs are not unique.")
     member_ids: list[str] = []
-    for block in document.blocks:
+    for index, block in enumerate(document.blocks):
         if block.kind in TEXT_KINDS and not block.source.strip():
             errors.append(f"Empty body block remains: {block.id}")
         if block.kind in {"aside", "page_footnote", "front_note", "endnote"}:
@@ -47,7 +89,9 @@ def structure_report(
         if block.kind == "figure":
             if not block.asset:
                 errors.append(f"Figure {block.id} has no asset.")
-            if SUBFIGURE_ONLY.fullmatch(block.caption_source):
+            if SUBFIGURE_ONLY.fullmatch(
+                block.caption_source
+            ) and not _subfigure_label_has_nearby_caption(document, index):
                 errors.append(f"Figure {block.id} has an orphaned subfigure label.")
         if block.kind == "figure_group":
             if len(block.members) < 2:

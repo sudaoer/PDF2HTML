@@ -112,6 +112,32 @@ def _union_bbox(blocks: list[DocumentBlock]) -> list[float]:
     ]
 
 
+def _row_major_figures(figures: list[DocumentBlock]) -> list[DocumentBlock]:
+    """Sort reviewed panels left-to-right within geometrically detected rows."""
+    rows: list[list[DocumentBlock]] = []
+    for block in sorted(figures, key=lambda item: (item.bbox[1], item.bbox[0], item.id)):
+        block_height = block.bbox[3] - block.bbox[1]
+        matched_row: list[DocumentBlock] | None = None
+        for row in rows:
+            row_top = min(item.bbox[1] for item in row)
+            row_bottom = max(item.bbox[3] for item in row)
+            overlap = max(0.0, min(row_bottom, block.bbox[3]) - max(row_top, block.bbox[1]))
+            overlap_base = min(row_bottom - row_top, block_height)
+            if overlap_base > 0 and overlap / overlap_base >= 0.5:
+                matched_row = row
+                break
+        if matched_row is None:
+            rows.append([block])
+        else:
+            matched_row.append(block)
+    rows.sort(key=lambda row: min(item.bbox[1] for item in row))
+    return [
+        block
+        for row in rows
+        for block in sorted(row, key=lambda item: (item.bbox[0], item.bbox[1], item.id))
+    ]
+
+
 def _group(blocks: list[DocumentBlock], operation: LayoutOperation) -> list[DocumentBlock]:
     target_ids = [target.id for target in operation.targets]
     if len(target_ids) < 2 or len(set(target_ids)) != len(target_ids):
@@ -131,7 +157,7 @@ def _group(blocks: list[DocumentBlock], operation: LayoutOperation) -> list[Docu
         raise LayoutOverrideError("Grouped figures must be on the same PDF page.")
     if any(len(block.bbox) != 4 for block in figures):
         raise LayoutOverrideError("Every grouped figure needs a four-value bbox.")
-    figures.sort(key=lambda block: (block.bbox[0], block.bbox[1], block.id))
+    figures = _row_major_figures(figures)
     ids = [block.id for block in figures]
     if operation.caption_from not in target_ids:
         raise LayoutOverrideError("group.caption_from must name one of the grouped targets.")

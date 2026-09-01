@@ -65,6 +65,7 @@ describe("application routes", () => {
           translations: [
             { id: "meta.title", source_hash: "a", target: "中文标题" },
             { id: "b1.text", source_hash: "b", target: "中文正文" },
+            { id: "note.text", source_hash: "c", target: "贡献相同。机构 $^{2}$" },
           ],
           document: {
             job_id: "job",
@@ -79,7 +80,17 @@ describe("application routes", () => {
               tags: [],
             },
             segments: [],
-            front_matter_notes: [],
+            front_matter_notes: [
+              {
+                id: "note",
+                kind: "author_note",
+                marker: "1",
+                page: 0,
+                source: "Equal contribution. Institute $^{2}$",
+                segment_id: "note.text",
+                url: "",
+              },
+            ],
             endnotes: [],
             blocks: [
               {
@@ -106,6 +117,10 @@ describe("application routes", () => {
     const wrapper = mount(App);
     await flushPromises();
     expect(wrapper.text()).toContain("中文正文");
+    expect(wrapper.find(".paper-front-notes .target sup").text()).toBe("1");
+    expect(wrapper.find(".paper-front-notes .target").text()).toContain("1贡献相同。机构");
+    expect(wrapper.find(".paper-front-notes .source").text()).toContain("1Equal contribution. Institute");
+    expect(wrapper.findAll(".paper-front-notes .katex")).toHaveLength(2);
     expect(document.title).toContain("中文标题 · English title");
     const chinese = wrapper.findAll("button").find((button) => button.text() === "中文");
     await chinese?.trigger("click");
