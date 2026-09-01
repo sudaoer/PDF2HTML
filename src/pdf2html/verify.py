@@ -6,6 +6,7 @@ from typing import Any
 
 from bs4 import BeautifulSoup
 
+from .bundle_verify import BundleVerificationError, verify_bundle
 from .models import Document
 from .render import EQUATION_TAG_COMMAND, _parse_equation
 from .translations import load_translations
@@ -98,7 +99,7 @@ def write_structure_report(
     return report
 
 
-def verify_output(
+def verify_legacy_html(
     document: Document,
     translation_dir: Path,
     html_path: Path,
@@ -244,3 +245,35 @@ def verify_output(
     if errors:
         raise VerificationError("; ".join(errors))
     return report
+
+
+def verify_output(
+    document: Document,
+    translation_dir: Path,
+    html_path: Path,
+    report_path: Path,
+    *,
+    bundle_path: Path | None = None,
+) -> dict[str, Any]:
+    bundle_report = verify_bundle(bundle_path) if bundle_path is not None else None
+    legacy_report = verify_legacy_html(
+        document,
+        translation_dir,
+        html_path,
+        report_path,
+    )
+    if bundle_report is not None:
+        legacy_report["bundle"] = bundle_report
+        atomic_write_json(report_path, legacy_report)
+    return legacy_report
+
+
+__all__ = [
+    "BundleVerificationError",
+    "VerificationError",
+    "structure_report",
+    "verify_bundle",
+    "verify_legacy_html",
+    "verify_output",
+    "write_structure_report",
+]

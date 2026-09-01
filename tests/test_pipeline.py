@@ -7,6 +7,7 @@ import pytest
 from bs4 import BeautifulSoup
 
 from pdf2html.bundle import BundleError, PaperBundle, build_bundle
+from pdf2html.bundle_verify import BundleVerificationError, verify_bundle
 from pdf2html.document import build_document, write_document, write_translation_tasks
 from pdf2html.layout import LayoutOverrideError, apply_layout_overrides, block_fingerprint
 from pdf2html.models import (
@@ -236,6 +237,62 @@ def test_job_manifest_v1_migrates_to_bundle_fields() -> None:
     assert migrated["legacy_html_path"] == payload["output_path"]
     assert migrated["bundle_path"] == ""
     assert migrated["bundle_revision"] == ""
+
+
+@pytest.mark.parametrize(
+    ("mutation", "error"),
+    [
+        ("markdown", "hash or size changed"),
+        ("unsafe_html", "unsafe raw HTML"),
+        ("extra_media", "does not exactly match"),
+        ("traversal", "Invalid bundle media path"),
+        ("extra_field", "Invalid paper.json"),
+    ],
+)
+def test_bundle_verifier_rejects_corruption(
+    tmp_path: Path,
+    mutation: str,
+    error: str,
+) -> None:
+    document, content_path = prepared_document(tmp_path)
+    translations = {segment.id: f"译文：{segment.source}" for segment in document.segments}
+    result = build_bundle(
+        document,
+        translations,
+        content_list_path=content_path,
+        library_root=tmp_path / "output" / "library",
+    )
+    if mutation in {"markdown", "unsafe_html"}:
+        markdown = result.paper_dir / "paper.en.md"
+        suffix = "\n" if mutation == "markdown" else "\n<script>alert(1)</script>\n"
+        markdown.write_text(markdown.read_text(encoding="utf-8") + suffix, encoding="utf-8")
+    elif mutation == "extra_media":
+        (result.paper_dir / "media" / "extra.png").write_bytes(b"extra")
+    else:
+        payload = read_json(result.bundle_path)
+        assert isinstance(payload, dict)
+        if mutation == "traversal":
+            payload["media"][0]["path"] = "media/../outside.png"
+        else:
+            payload["unexpected"] = True
+        atomic_write_json(result.bundle_path, payload)
+    with pytest.raises(BundleVerificationError, match=error):
+        verify_bundle(result.bundle_path)
+
+
+def test_bundle_verifier_rejects_invalid_equation_tag(tmp_path: Path) -> None:
+    document, content_path = prepared_document(tmp_path)
+    equation = next(block for block in document.blocks if block.kind == "equation")
+    equation.source = r"E = mc^2\tag{1} trailing"
+    translations = {segment.id: f"译文：{segment.source}" for segment in document.segments}
+    result = build_bundle(
+        document,
+        translations,
+        content_list_path=content_path,
+        library_root=tmp_path / "output" / "library",
+    )
+    with pytest.raises(BundleVerificationError, match="invalid tag command"):
+        verify_bundle(result.bundle_path)
 
 
 @pytest.mark.parametrize(

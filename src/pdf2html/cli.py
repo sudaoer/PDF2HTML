@@ -42,7 +42,13 @@ from .util import (
     slugify,
     utc_now,
 )
-from .verify import VerificationError, structure_report, verify_output, write_structure_report
+from .verify import (
+    BundleVerificationError,
+    VerificationError,
+    structure_report,
+    verify_output,
+    write_structure_report,
+)
 from .zotero import Library, SelectedPaper, ZoteroClient, ZoteroError
 
 app = typer.Typer(
@@ -539,11 +545,19 @@ def verify(
             _root() / manifest.translation_dir,
             _root() / manifest.output_path,
             _job_dir(job) / "verification.json",
+            bundle_path=_root() / manifest.bundle_path,
         )
         manifest.status = "verified"
         _save_manifest(manifest)
         typer.echo(json.dumps(report, ensure_ascii=False, indent=2))
-    except (ValidationError, TranslationError, VerificationError, OSError, ValueError) as exc:
+    except (
+        BundleVerificationError,
+        ValidationError,
+        TranslationError,
+        VerificationError,
+        OSError,
+        ValueError,
+    ) as exc:
         typer.echo(f"ERROR: {exc}", err=True)
         raise typer.Exit(1) from exc
 

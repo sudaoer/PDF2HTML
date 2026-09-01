@@ -13,7 +13,7 @@ from markdown_it import MarkdownIt
 
 from .bundle import bundle_shelf_record
 from .models import Document
-from .util import atomic_write_text, read_json, slugify
+from .util import atomic_write_text, hash_file, read_json, slugify
 
 MATH_PATTERN = re.compile(
     r"(\$\$(?P<dollar_display>.*?)\$\$|\\\[(?P<bracket_display>.*?)\\\]|"
@@ -272,11 +272,10 @@ def _copy_asset(asset: str, mineru_base: Path, media_dir: Path) -> str:
     if not candidate.is_file():
         raise RenderError(f"MinerU asset is missing: {asset}")
     media_dir.mkdir(parents=True, exist_ok=True)
-    destination = media_dir / candidate.name
-    if destination.exists() and destination.read_bytes() != candidate.read_bytes():
-        destination = media_dir / (
-            f"{candidate.stem}-{abs(hash(str(candidate))) & 0xFFFF:x}{candidate.suffix}"
-        )
+    extension = candidate.suffix.lower()
+    if extension == ".jpeg":
+        extension = ".jpg"
+    destination = media_dir / f"{hash_file(candidate)}{extension}"
     if not destination.exists():
         shutil.copy2(candidate, destination)
     return f"media/{destination.name}"
