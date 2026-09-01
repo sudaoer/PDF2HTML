@@ -20,14 +20,17 @@ verified.
 1. Run `pixi run pdf2html preflight`.
 2. Run one selector, for example
    `pixi run pdf2html prepare --item "Exact paper title"`.
-3. Compare the source PDF, MinerU blocks, `layout_report.json`, and the reported
-   source-only layout preview at desktop and mobile widths. Do not edit preview
-   or final HTML.
+3. Compare the source PDF, MinerU blocks, `layout_report.json` (including every
+   entry in `heading_outline`), and the reported source-only layout preview at
+   desktop and mobile widths. Confirm that the metadata title is the only H1,
+   body sections begin at H2, and subsections do not skip levels. Do not edit
+   preview or final HTML.
 4. If deterministic normalization is insufficient, create
    `layout_overrides.json` using only validated `group`, `move`, `reclassify`,
    and `drop` operations, then run `pixi run pdf2html layout --job <job-id>` and
    review the refreshed preview. Never weaken or bypass stale hash, page, bbox,
-   or block fingerprint checks.
+   or block fingerprint checks. A `reclassify` operation targeting `heading`
+   must include the reviewed heading `level` from 1 through 6.
 5. Run `pixi run pdf2html finalize-layout --job <job-id>` only after visual
    review. This locks the reviewed layout and creates translation tasks.
 6. Read every JSON file under the reported `translation_tasks` directory.

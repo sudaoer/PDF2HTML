@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 from typing import Any, cast
 
+from .headings import is_front_matter_duplicate, normalize_heading_structure
 from .layout import SUBFIGURE_PREFIX, apply_layout_overrides, block_fingerprint
 from .models import (
     Document,
@@ -318,18 +319,25 @@ def build_document(
     metadata: PaperMetadata,
     source: SourceReference,
     content_list_path: Path,
+    middle_json_path: Path | None = None,
     content_sha256: str = "",
     overrides: LayoutOverrides | None = None,
 ) -> Document:
     entries = _content_entries(read_json(content_list_path))
     primitive_blocks = _primitive_blocks(entries)
-    nonempty_blocks, empty_count = _drop_empty_blocks(primitive_blocks)
+    heading_blocks, heading_info = normalize_heading_structure(
+        primitive_blocks,
+        metadata=metadata,
+        middle_json_path=middle_json_path,
+    )
+    nonempty_blocks, empty_count = _drop_empty_blocks(heading_blocks)
     grouped_blocks, group_count = _group_adjacent_figures(nonempty_blocks)
     override_targets = [
         {
             "id": block.id,
             "kind": block.kind,
             "page": block.page,
+            "level": block.level,
             "bbox": block.bbox,
             "block_hash": block_fingerprint(block),
         }
@@ -360,6 +368,7 @@ def build_document(
             "dropped_empty_blocks": empty_count,
             "overrides_applied": override_count,
             "override_targets": override_targets,
+            **heading_info,
         },
     )
 
@@ -654,6 +663,8 @@ def _assign_segments(
         add_segment("meta.abstract", "abstract", metadata.abstract)
 
     for block in rendered_blocks:
+        if is_front_matter_duplicate(block):
+            continue
         if block.kind in {"heading", "paragraph", "list"}:
             block.segment_id = add_segment(f"{block.id}.text", block.kind, block.source)
         elif block.kind == "table":

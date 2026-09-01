@@ -9,6 +9,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .headings import is_front_matter_duplicate
 from .models import Document, Segment
 from .util import atomic_write_bytes, canonical_json_bytes, slugify
 
@@ -260,6 +261,8 @@ def render_bundle_markdown(
         )
 
     for block in document.blocks:
+        if is_front_matter_duplicate(block):
+            continue
         block_id = _attribute(block.id, label="block ID")
         kind = _attribute(block.kind, label="block kind")
         chunks.extend(

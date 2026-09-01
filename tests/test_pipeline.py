@@ -252,13 +252,15 @@ def test_job_manifest_v1_migrates_to_bundle_fields() -> None:
     payload = {
         "schema_version": 1,
         "output_path": "output/library/papers/example/index.html",
+        "mineru": {"content_list_path": "paper_content_list_v2.json"},
     }
     migrated = migrate_job_manifest(payload)
-    assert migrated["schema_version"] == 4
+    assert migrated["schema_version"] == 5
     assert "output_path" not in migrated
     assert "legacy_html_path" not in migrated
     assert migrated["bundle_path"] == ""
     assert migrated["bundle_revision"] == ""
+    assert migrated["mineru"]["middle_json_path"] == ""
 
 
 @pytest.mark.parametrize(

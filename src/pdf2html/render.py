@@ -11,6 +11,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from latex2mathml.converter import convert as latex_to_mathml
 from markdown_it import MarkdownIt
 
+from .headings import is_front_matter_duplicate
 from .models import Document
 from .util import atomic_write_text, hash_file
 
@@ -321,12 +322,12 @@ def _build_paper_page(
     blocks: list[dict[str, Any]] = []
     toc: list[dict[str, Any]] = []
     endnote_links = {(note.page, note.marker): note.id for note in document.endnotes if note.marker}
-    stream_blocks = document.blocks
+    stream_blocks = [block for block in document.blocks if not is_front_matter_duplicate(block)]
     if document.metadata.abstract:
         introduction_index = next(
             (
                 index
-                for index, block in enumerate(document.blocks)
+                for index, block in enumerate(stream_blocks)
                 if block.kind == "heading"
                 and re.sub(r"^\d+(?:\.\d+)*\s*", "", block.source).strip().casefold()
                 == "introduction"
@@ -339,10 +340,10 @@ def _build_paper_page(
             # then begin the reflowed body at the Introduction heading.
             useful_front_matter = [
                 block
-                for block in document.blocks[:introduction_index]
+                for block in stream_blocks[:introduction_index]
                 if block.kind == "paragraph" and "http" in block.source.casefold()
             ]
-            stream_blocks = useful_front_matter + document.blocks[introduction_index:]
+            stream_blocks = useful_front_matter + stream_blocks[introduction_index:]
     for block in stream_blocks:
         source_html = ""
         target_html = ""

@@ -36,6 +36,7 @@ def block_fingerprint(block: DocumentBlock) -> str:
     payload = {
         "id": block.id,
         "kind": block.kind,
+        "level": block.level,
         "page": block.page,
         "bbox": block.bbox,
         "source": block.source,
@@ -44,6 +45,13 @@ def block_fingerprint(block: DocumentBlock) -> str:
         "footnote_source": block.footnote_source,
         "members": [member.model_dump(mode="json") for member in block.members],
         "mineru_type": block.extra.get("mineru_type", ""),
+        "heading_source_level": block.extra.get("heading_source_level"),
+        "heading_level_origin": block.extra.get("heading_level_origin", ""),
+        "heading_alignment": block.extra.get("heading_alignment", ""),
+        "heading_ambiguous": block.extra.get("heading_ambiguous", False),
+        "front_matter_role": block.extra.get("front_matter_role", ""),
+        "origin_block_id": block.extra.get("origin_block_id", ""),
+        "origin_line_indices": block.extra.get("origin_line_indices", []),
     }
     return hash_text(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
 
@@ -195,13 +203,27 @@ def _move(blocks: list[DocumentBlock], operation: LayoutOperation) -> list[Docum
 def _reclassify(blocks: list[DocumentBlock], operation: LayoutOperation) -> list[DocumentBlock]:
     if len(operation.targets) != 1 or operation.kind not in ALLOWED_RECLASSIFICATIONS:
         raise LayoutOverrideError("reclassify requires one target and a supported kind.")
+    if operation.kind == "heading" and not (
+        operation.level is not None and 1 <= operation.level <= 6
+    ):
+        raise LayoutOverrideError("reclassify to heading requires level from 1 through 6.")
+    if operation.kind != "heading" and operation.level is not None:
+        raise LayoutOverrideError("Only heading reclassifications can specify level.")
     target_id = operation.targets[0].id
     result = [block.model_copy(deep=True) for block in blocks]
     target = next((block for block in result if block.id == target_id), None)
     if target is None:
         raise LayoutOverrideError("A reclassify target was changed by an earlier operation.")
     target.kind = operation.kind
+    if operation.kind == "heading":
+        assert operation.level is not None
+        target.level = operation.level
+    else:
+        target.level = 0
     target.extra["override"] = True
+    if operation.kind == "heading":
+        target.extra["heading_level_origin"] = "override"
+        target.extra.pop("heading_ambiguous", None)
     return result
 
 

@@ -16,6 +16,7 @@ from .bundle import (
     PaperBundle,
     render_bundle_markdown,
 )
+from .headings import is_front_matter_duplicate
 from .render import _parse_equation
 from .util import atomic_write_json, canonical_json_bytes, hash_file, read_json
 
@@ -151,7 +152,9 @@ def _validate_markdown_ast(
     bundle: PaperBundle,
     errors: list[str],
 ) -> None:
-    block_ids = [block.id for block in bundle.document.blocks]
+    block_ids = [
+        block.id for block in bundle.document.blocks if not is_front_matter_duplicate(block)
+    ]
     marked_blocks = [match[0] for match in BLOCK_PATTERN.findall(text)]
     ended_blocks = END_BLOCK_PATTERN.findall(text)
     anchors = ANCHOR_PATTERN.findall(text)
@@ -262,6 +265,13 @@ def _validate_document(bundle: PaperBundle, errors: list[str]) -> None:
         )
         if block.kind == "figure" and not block.asset:
             errors.append(f"Figure {block.id} has no media asset.")
+        if block.kind == "heading":
+            if not 1 <= block.level <= 6:
+                errors.append(f"Heading {block.id} has invalid level {block.level}.")
+            if block.extra.get("heading_ambiguous"):
+                errors.append(f"Heading {block.id} has unresolved hierarchy.")
+        elif block.level != 0:
+            errors.append(f"Non-heading block {block.id} retains level {block.level}.")
         if block.kind == "figure_group":
             labels = [member.label.casefold() for member in block.members]
             expected = [f"({chr(ord('a') + index)})" for index in range(len(labels))]
@@ -284,6 +294,17 @@ def _validate_document(bundle: PaperBundle, errors: list[str]) -> None:
     )
     if len(member_ids) != len(set(member_ids)):
         errors.append("Figure member IDs are not unique.")
+    previous_level = 1
+    for block in document.blocks:
+        if block.kind != "heading" or is_front_matter_duplicate(block):
+            continue
+        if block.level == 1:
+            errors.append(f"Body heading {block.id} improperly uses level 1.")
+        if block.level > previous_level + 1:
+            errors.append(
+                f"Heading {block.id} jumps from level {previous_level} to {block.level}."
+            )
+        previous_level = block.level
     if sorted(referenced_segments) != sorted(segment_ids):
         errors.append("Document segment references are incomplete or duplicated.")
 

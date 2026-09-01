@@ -46,18 +46,23 @@ const visiblePapers = computed(() => {
 const visibleBlocks = computed(() => {
   const document = bundle.value?.document;
   if (!document) return [];
-  if (!document.metadata.abstract) return document.blocks;
-  const introduction = document.blocks.findIndex(
+  const bodyBlocks = document.blocks.filter(
+    (block) => !["document_title", "abstract_heading", "abstract_body"].includes(
+      String(block.extra.front_matter_role ?? ""),
+    ),
+  );
+  if (!document.metadata.abstract) return bodyBlocks;
+  const introduction = bodyBlocks.findIndex(
     (block) =>
       block.kind === "heading" &&
       block.source.replace(/^\d+(?:\.\d+)*\s*/, "").trim().toLowerCase() === "introduction",
   );
-  if (introduction < 0) return document.blocks;
+  if (introduction < 0) return bodyBlocks;
   return [
-    ...document.blocks.slice(0, introduction).filter(
+    ...bodyBlocks.slice(0, introduction).filter(
       (block) => block.kind === "paragraph" && block.source.toLowerCase().includes("http"),
     ),
-    ...document.blocks.slice(introduction),
+    ...bodyBlocks.slice(introduction),
   ];
 });
 const toc = computed(() => visibleBlocks.value.filter((block) => block.kind === "heading"));

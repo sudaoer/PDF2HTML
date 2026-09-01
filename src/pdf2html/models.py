@@ -33,10 +33,11 @@ class MinerURecord(BaseModel):
     effort: str = "medium"
     command: list[str] = Field(default_factory=list)
     content_list_path: str = ""
+    middle_json_path: str = ""
 
 
 class JobManifest(BaseModel):
-    schema_version: int = 4
+    schema_version: int = 5
     job_id: str
     created_at: str
     updated_at: str
@@ -67,7 +68,7 @@ def migrate_job_manifest(payload: Any) -> dict[str, Any]:
         raise ValueError("Job manifest must be a JSON object.")
     migrated = dict(payload)
     version = int(migrated.get("schema_version", 1))
-    if version > 4:
+    if version > 5:
         raise ValueError(f"Unsupported job manifest schema: {version}")
     if version < 3:
         migrated.setdefault("bundle_path", "")
@@ -75,7 +76,10 @@ def migrate_job_manifest(payload: Any) -> dict[str, Any]:
     migrated.pop("output_path", None)
     migrated.pop("legacy_html_path", None)
     migrated.setdefault("verification_report_path", "")
-    migrated["schema_version"] = 4
+    mineru = migrated.get("mineru")
+    if isinstance(mineru, dict):
+        mineru.setdefault("middle_json_path", "")
+    migrated["schema_version"] = 5
     return migrated
 
 
@@ -153,6 +157,7 @@ class LayoutOperation(BaseModel):
     caption_from: str = ""
     layout: Literal["auto", "row", "column", "grid"] = "auto"
     kind: str = ""
+    level: int | None = None
 
 
 class LayoutOverrides(BaseModel):

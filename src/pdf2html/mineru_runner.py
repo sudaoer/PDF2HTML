@@ -61,6 +61,11 @@ def find_content_list(output_dir: Path) -> Path | None:
     return v1[0] if v1 else None
 
 
+def find_middle_json(output_dir: Path) -> Path | None:
+    candidates = sorted(output_dir.rglob("*_middle.json"))
+    return candidates[0] if candidates else None
+
+
 def run_mineru(
     source_pdf: Path,
     output_dir: Path,

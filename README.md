@@ -34,6 +34,8 @@ pixi run pdf2html prepare --tag pdf2html
 
 `prepare` 会将每份 PDF 复制到 `.work/jobs/` 下，运行 MinerU，执行保守的结构归一化，并生成源语言布局预览和 `layout_report.json`。此阶段不会生成翻译任务。Codex 必须先对照源 PDF、MinerU 块和桌面/移动预览完成版面审查；常见组合图和页注由确定性代码处理，特殊情况写入带哈希前置条件的 `layout_overrides.json`。
 
+标题归一化会同时哈希 MinerU 的 content list 与 `middle.json` 行级结构。论文元数据标题是唯一的 `h1`，正文主节从 `h2` 开始；`layout_report.json` 的 `heading_outline` 会列出每个标题的原始层级、最终层级、对齐方式和判定来源。自动判定优先使用明确的十进制编号与可信 MinerU 层级，只有在栏内居中/左对齐证据形成稳定分组时才推断 `h2`/`h3`。
+
 修改或新增 override 后重新生成预览：
 
 ```powershell
@@ -63,7 +65,7 @@ pixi run pdf2html layout --job <job-id>
 }
 ```
 
-`move` 使用两个 target（移动块、锚点）以及 `before_id` 或 `after_id`；`reclassify` 使用一个 target 和受支持的 `kind`；`drop` 使用一个 target 和必填原因。override 不能修改文本、图片路径、译文或 HTML，任何前置条件失配都会使整份文件失效。
+`move` 使用两个 target（移动块、锚点）以及 `before_id` 或 `after_id`；`reclassify` 使用一个 target 和受支持的 `kind`，改为 `heading` 时还必须提供 1–6 的 `level`；`drop` 使用一个 target 和必填原因。override 不能修改文本、图片路径、译文或 HTML，任何前置条件失配都会使整份文件失效。标题层级属于块指纹的一部分，因此刷新归一化规则后必须从最新报告复制 target。
 
 预览通过后锁定结构并生成翻译任务：
 

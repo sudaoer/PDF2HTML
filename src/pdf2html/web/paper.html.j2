@@ -28,6 +28,7 @@
       <nav>
       {% for item in toc %}
         <a class="toc-level-{{ item.level }}" href="#{{ item.id }}">
+          {% if preview %}<b class="heading-debug">H{{ item.level }}</b>{% endif %}
           <span lang="zh-CN">{{ item.target }}</span>
           <small lang="en">{{ item.source }}</small>
         </a>
@@ -73,7 +74,7 @@
         <section class="paper-body">
         {% for block in blocks %}
           {% if block.kind == 'heading' %}
-          <section class="heading-pair pair" id="{{ block.id }}" data-page="{{ block.page }}">
+          <section class="heading-pair heading-level-{{ block.level }} pair" id="{{ block.id }}" data-page="{{ block.page }}">
             <div class="target" lang="zh-CN"><h{{ block.level }}>{{ block.target_html | safe }}</h{{ block.level }}></div>
             <div class="source" lang="en"><h{{ block.level }}>{{ block.source_html | safe }}</h{{ block.level }}></div>
           </section>

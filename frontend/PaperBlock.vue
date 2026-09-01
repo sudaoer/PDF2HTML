@@ -19,7 +19,8 @@ const captionTarget = computed(
 const footnoteTarget = computed(
   () => props.translations[props.block.footnote_segment_id] ?? "",
 );
-const heading = computed(() => `h${Math.min(6, Math.max(1, props.block.level || 1))}`);
+const headingLevel = computed(() => Math.min(6, Math.max(1, props.block.level || 1)));
+const heading = computed(() => `h${headingLevel.value}`);
 const pages = computed(() => {
   const raw = props.block.extra.origin_pages;
   const values = Array.isArray(raw) && raw.length ? raw.map(Number) : [props.block.page];
@@ -38,6 +39,7 @@ const media = (asset: string) => {
     v-if="block.kind === 'heading'"
     :id="block.id"
     class="heading-pair pair"
+    :class="`heading-level-${headingLevel}`"
     :data-page="block.page + 1"
   >
     <div class="target" lang="zh-CN">

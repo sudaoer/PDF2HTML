@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .bundle import PaperBundle
+from .headings import is_front_matter_duplicate
 
 ENGLISH_WORD = re.compile(r"[A-Za-z0-9]+(?:['-][A-Za-z0-9]+)*")
 HAN_RUN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]+")
@@ -99,6 +100,8 @@ def _bundle_records(bundle: PaperBundle) -> list[SearchRecord]:
         )
     ]
     for block in document.blocks:
+        if is_front_matter_duplicate(block):
+            continue
         source_parts = [block.source, block.caption_source, block.footnote_source]
         target_parts = [
             translations.get(block.segment_id, ""),

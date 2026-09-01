@@ -17,6 +17,7 @@ from .layout import LayoutOverrideError, load_layout_overrides
 from .mineru_runner import (
     MinerUError,
     executable_path,
+    find_middle_json,
     mineru_version,
     run_mineru,
 )
@@ -53,7 +54,7 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
-LAYOUT_PIPELINE_VERSION = "3"
+LAYOUT_PIPELINE_VERSION = "4"
 
 
 def _root() -> Path:
@@ -76,12 +77,14 @@ def _load_manifest(job_id: str) -> JobManifest:
 
 
 def _save_manifest(manifest: JobManifest) -> None:
-    manifest.schema_version = 4
+    manifest.schema_version = 5
     manifest.updated_at = utc_now()
     atomic_write_json(_manifest_path(manifest.job_id), manifest.model_dump(mode="json"))
 
 
-def _layout_inputs(manifest: JobManifest) -> tuple[Path, str, Path, str, str]:
+def _layout_inputs(
+    manifest: JobManifest,
+) -> tuple[Path, str, Path | None, str, Path, str, str]:
     source_copy = _job_dir(manifest.job_id) / "source.pdf"
     if not source_copy.is_file() or hash_file(source_copy) != manifest.source.sha256:
         raise ValueError("The job source PDF is missing or its SHA-256 changed.")
@@ -89,6 +92,17 @@ def _layout_inputs(manifest: JobManifest) -> tuple[Path, str, Path, str, str]:
     if not content_path.is_file():
         raise ValueError(f"MinerU content list is missing: {content_path}")
     content_hash = hash_file(content_path)
+    middle_path = (
+        _root() / manifest.mineru.middle_json_path
+        if manifest.mineru.middle_json_path
+        else find_middle_json(_job_dir(manifest.job_id) / "mineru")
+    )
+    if middle_path is not None and middle_path.is_file():
+        manifest.mineru.middle_json_path = relative_to(middle_path, _root())
+        middle_hash = hash_file(middle_path)
+    else:
+        middle_path = None
+        middle_hash = ""
     override_path = _job_dir(manifest.job_id) / "layout_overrides.json"
     override_hash = hash_file(override_path) if override_path.is_file() else ""
     input_hash = hash_text(
@@ -97,17 +111,32 @@ def _layout_inputs(manifest: JobManifest) -> tuple[Path, str, Path, str, str]:
                 LAYOUT_PIPELINE_VERSION,
                 manifest.source.sha256,
                 content_hash,
+                middle_hash,
                 override_hash,
             )
         )
     )
-    return content_path, content_hash, override_path, override_hash, input_hash
+    return (
+        content_path,
+        content_hash,
+        middle_path,
+        middle_hash,
+        override_path,
+        override_hash,
+        input_hash,
+    )
 
 
 def _write_layout(manifest: JobManifest) -> dict[str, Any]:
-    content_path, content_hash, override_path, override_hash, input_hash = _layout_inputs(
-        manifest
-    )
+    (
+        content_path,
+        content_hash,
+        middle_path,
+        middle_hash,
+        override_path,
+        override_hash,
+        input_hash,
+    ) = _layout_inputs(manifest)
     override_errors: list[str] = []
     overrides = None
     try:
@@ -122,6 +151,7 @@ def _write_layout(manifest: JobManifest) -> dict[str, Any]:
             metadata=manifest.metadata,
             source=manifest.source,
             content_list_path=content_path,
+            middle_json_path=middle_path,
             content_sha256=content_hash,
             overrides=overrides,
         )
@@ -132,6 +162,7 @@ def _write_layout(manifest: JobManifest) -> dict[str, Any]:
             metadata=manifest.metadata,
             source=manifest.source,
             content_list_path=content_path,
+            middle_json_path=middle_path,
             content_sha256=content_hash,
         )
     document.layout_info.update(
@@ -139,6 +170,7 @@ def _write_layout(manifest: JobManifest) -> dict[str, Any]:
             "pipeline_version": LAYOUT_PIPELINE_VERSION,
             "layout_input_hash": input_hash,
             "overrides_sha256": override_hash,
+            "middle_sha256": middle_hash,
         }
     )
     job_dir = _job_dir(manifest.job_id)
@@ -173,7 +205,7 @@ def _write_layout(manifest: JobManifest) -> dict[str, Any]:
 
 
 def _assert_current_layout(manifest: JobManifest) -> tuple[Document, dict[str, Any]]:
-    _, _, _, _, input_hash = _layout_inputs(manifest)
+    _, _, _, _, _, _, input_hash = _layout_inputs(manifest)
     if input_hash != manifest.layout_input_hash:
         raise ValueError(
             "Layout inputs changed; run the layout command and review the preview again."
@@ -368,6 +400,11 @@ def _prepare_one(
             effort=effort,
             command=command or manifest.mineru.command,
             content_list_path=relative_to(content_list, _root()),
+            middle_json_path=(
+                relative_to(middle_path, _root())
+                if (middle_path := find_middle_json(mineru_dir)) is not None
+                else ""
+            ),
         )
         manifest.document_path = ""
         report = _write_layout(manifest)

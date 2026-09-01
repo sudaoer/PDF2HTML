@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .bundle_verify import BundleVerificationError, verify_bundle
+from .headings import is_front_matter_duplicate
 from .models import Document
 from .util import atomic_write_json
 
@@ -18,7 +19,12 @@ def structure_report(
     extra_errors: list[str] | None = None,
 ) -> dict[str, Any]:
     errors = list(extra_errors or [])
-    warnings: list[str] = []
+    heading_warnings = document.layout_info.get("heading_warnings", [])
+    warnings = (
+        [str(item) for item in heading_warnings]
+        if isinstance(heading_warnings, list)
+        else []
+    )
     block_ids = [block.id for block in document.blocks]
     if len(block_ids) != len(set(block_ids)):
         errors.append("Document block IDs are not unique.")
@@ -31,6 +37,13 @@ def structure_report(
             errors.append(f"Empty body block remains: {block.id}")
         if block.kind in {"aside", "page_footnote", "front_note", "endnote"}:
             errors.append(f"Footnote-like block remains in the body: {block.id}")
+        if block.kind == "heading":
+            if not 1 <= block.level <= 6:
+                errors.append(f"Heading {block.id} has invalid level {block.level}.")
+            if block.extra.get("heading_ambiguous"):
+                errors.append(f"Heading {block.id} has unresolved line-level hierarchy.")
+        elif block.level != 0:
+            errors.append(f"Non-heading block {block.id} retains heading level {block.level}.")
         if block.kind == "figure":
             if not block.asset:
                 errors.append(f"Figure {block.id} has no asset.")
@@ -61,6 +74,32 @@ def structure_report(
     note_ids = [note.id for note in [*document.front_matter_notes, *document.endnotes]]
     if len(note_ids) != len(set(note_ids)):
         errors.append("Document note IDs are not unique.")
+    outline_blocks = [
+        block
+        for block in document.blocks
+        if block.kind == "heading" and not is_front_matter_duplicate(block)
+    ]
+    previous_level = 1
+    for block in outline_blocks:
+        if block.level == 1:
+            errors.append(f"Body heading {block.id} improperly uses level 1.")
+        if block.level > previous_level + 1:
+            errors.append(
+                f"Heading {block.id} jumps from level {previous_level} to {block.level}."
+            )
+        previous_level = block.level
+    heading_outline = [
+        {
+            "id": block.id,
+            "page": block.page,
+            "level": block.level,
+            "source": block.source,
+            "source_level": block.extra.get("heading_source_level", block.level),
+            "origin": block.extra.get("heading_level_origin", ""),
+            "alignment": block.extra.get("heading_alignment", ""),
+        }
+        for block in outline_blocks
+    ]
     return {
         "job_id": document.job_id,
         "status": "failed" if errors else "passed",
@@ -72,8 +111,9 @@ def structure_report(
         "normalization": {
             key: value
             for key, value in document.layout_info.items()
-            if key != "override_targets"
+            if key not in {"override_targets", "heading_warnings"}
         },
+        "heading_outline": heading_outline,
         "override_targets": document.layout_info.get("override_targets", []),
         "warnings": warnings,
         "errors": errors,
