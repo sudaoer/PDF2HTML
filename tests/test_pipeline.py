@@ -648,6 +648,9 @@ def test_composite_figure_and_page_notes_are_normalized(tmp_path: Path) -> None:
         encoding="utf-8"
     )
     assert ".figure-members { grid-template-columns: minmax(0, 1fr) !important; }" in css
+    assert "@media (min-width: 641px)" in css
+    assert "font-size: clamp(2.1rem, 4.1vw, 3.2rem);" in css
+    assert "padding: clamp(1.5rem, 3.2vw, 2.5rem);" in css
 
 
 def test_conservative_grouping_leaves_distant_subfigures_for_review(tmp_path: Path) -> None:

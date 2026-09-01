@@ -107,6 +107,8 @@ report.mobile = await evaluate(`({
   clientWidth: document.documentElement.clientWidth,
   scrollWidth: document.documentElement.scrollWidth,
   heroRight: Math.round(document.querySelector('.paper-hero').getBoundingClientRect().right),
+  heroHeight: Math.round(document.querySelector('.paper-hero').getBoundingClientRect().height),
+  titleFontPx: Number.parseFloat(getComputedStyle(document.querySelector('.paper-hero h1')).fontSize),
   controlsRight: Math.round(document.querySelector('.reader-controls').getBoundingClientRect().right),
   overflows: [...document.querySelectorAll('body *')]
     .map((element) => {
@@ -147,6 +149,47 @@ await cdp.send("Emulation.setDeviceMetricsOverride", {
   deviceScaleFactor: 1,
   mobile: false,
 });
+await navigate(paperUrl);
+report.desktopLanding = await evaluate(`(() => {
+  const hero = document.querySelector('.paper-hero').getBoundingClientRect();
+  const title = document.querySelector('.paper-hero h1').getBoundingClientRect();
+  const abstract = document.querySelector('.abstract').getBoundingClientRect();
+  return {
+    innerWidth,
+    innerHeight,
+    clientWidth: document.documentElement.clientWidth,
+    scrollWidth: document.documentElement.scrollWidth,
+    titleFontPx: Number.parseFloat(getComputedStyle(document.querySelector('.paper-hero h1')).fontSize),
+    titleHeight: Math.round(title.height),
+    heroHeight: Math.round(hero.height),
+    abstractTop: Math.round(abstract.top)
+  };
+})()`);
+if (Math.abs(report.desktopLanding.titleFontPx - 51.2) > 0.1) {
+  throw new Error(`Desktop title font is ${report.desktopLanding.titleFontPx}px; expected 51.2px.`);
+}
+if (report.desktopLanding.titleHeight > 300) {
+  throw new Error(`Desktop title is ${report.desktopLanding.titleHeight}px tall; expected at most 300px.`);
+}
+if (report.desktopLanding.heroHeight > 850) {
+  throw new Error(`Desktop hero is ${report.desktopLanding.heroHeight}px tall; expected at most 850px.`);
+}
+if (report.desktopLanding.abstractTop >= report.desktopLanding.innerHeight) {
+  throw new Error(
+    `Desktop abstract starts at ${report.desktopLanding.abstractTop}px, below the first viewport.`,
+  );
+}
+if (report.desktopLanding.scrollWidth > report.desktopLanding.clientWidth) {
+  throw new Error(
+    `Desktop page overflows horizontally: ${report.desktopLanding.scrollWidth}px > `
+      + `${report.desktopLanding.clientWidth}px.`,
+  );
+}
+if (Math.abs(report.mobile.titleFontPx - 32) > 0.1) {
+  throw new Error(`Mobile title font is ${report.mobile.titleFontPx}px; expected 32px.`);
+}
+await screenshot("cdp-desktop-paper-top.png");
+
 const anchorId = await evaluate(`(() => {
   const headings = [...document.querySelectorAll('.heading-pair[id]')];
   const application = headings.find((heading) =>
