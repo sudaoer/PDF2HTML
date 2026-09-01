@@ -60,3 +60,6 @@ when their recorded source hashes still match.
 
 # 代码编写与提交
 - 在任务完成后创建git提交
+
+# 产物管理
+- 及时在产物目录创建git提交
