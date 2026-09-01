@@ -97,7 +97,7 @@
               <div class="source" lang="en">{{ block.footnote_source_html | safe }}</div>
             </div>
             {% endif %}
-            <span class="page-marker">PDF {{ block.page }}</span>
+            <span class="page-marker">{{ block.page_label }}</span>
           </figure>
           {% elif block.kind == 'figure' %}
           <figure id="{{ block.id }}" data-page="{{ block.page }}">
@@ -114,7 +114,7 @@
               <div class="source" lang="en">{{ block.footnote_source_html | safe }}</div>
             </div>
             {% endif %}
-            <span class="page-marker">PDF {{ block.page }}</span>
+            <span class="page-marker">{{ block.page_label }}</span>
           </figure>
           {% elif block.kind == 'table' %}
           <section class="table-block" id="{{ block.id }}" data-page="{{ block.page }}">
@@ -129,18 +129,18 @@
               <div class="source table-scroll" lang="en">{{ block.source_html | safe }}</div>
             </div>
             {% if block.asset %}<img class="table-fallback" src="{{ block.asset }}" alt="原始表格，第 {{ block.page }} 页" loading="lazy">{% endif %}
-            <span class="page-marker">PDF {{ block.page }}</span>
+            <span class="page-marker">{{ block.page_label }}</span>
           </section>
           {% elif block.kind in ['equation', 'code', 'reference'] %}
           <section class="source-only {{ block.kind }}" id="{{ block.id }}" data-page="{{ block.page }}" lang="en">
             {{ block.source_html | safe }}
-            <span class="page-marker">PDF {{ block.page }}</span>
+            <span class="page-marker">{{ block.page_label }}</span>
           </section>
           {% else %}
           <section class="text-pair pair {{ block.kind }}" id="{{ block.id }}" data-page="{{ block.page }}">
             <div class="target" lang="zh-CN">{{ block.target_html | safe }}</div>
             <div class="source" lang="en">{{ block.source_html | safe }}</div>
-            <span class="page-marker">PDF {{ block.page }}</span>
+            <span class="page-marker">{{ block.page_label }}</span>
           </section>
           {% endif %}
         {% endfor %}

@@ -25,7 +25,7 @@ from pdf2html.translations import (
     reconcile_translation_artifacts,
 )
 from pdf2html.util import atomic_write_json, hash_file, hash_text, read_json, slugify
-from pdf2html.verify import structure_report, verify_output
+from pdf2html.verify import VerificationError, structure_report, verify_output
 from pdf2html.zotero import ZoteroClient
 
 
@@ -134,6 +134,17 @@ def test_document_tasks_render_and_verify(tmp_path: Path) -> None:
     html = html_path.read_text(encoding="utf-8")
     assert "https://cdn" not in html
     assert "译文：Routing Networks" in html
+    html_path.write_text(
+        html.replace("</main>", '<code class="math-fallback">broken</code></main>'),
+        encoding="utf-8",
+    )
+    with pytest.raises(VerificationError, match="fell back"):
+        verify_output(
+            document,
+            translation_dir,
+            html_path,
+            tmp_path / "verification-with-fallback.json",
+        )
 
 
 def test_translation_rejects_lost_protected_token(tmp_path: Path) -> None:
@@ -157,6 +168,14 @@ def test_math_is_rendered_as_offline_mathml() -> None:
     assert "MATHPLACEHOLDER" not in rendered
     assert "<script" not in rendered
     assert "cdn" not in rendered
+
+
+def test_legacy_math_font_commands_are_normalized_and_unparsed_tex_falls_back() -> None:
+    rendered = render_markdown(r"The route uses $\textbf { \em F }$.")
+    assert 'mathvariant="bold-italic"' in rendered
+    assert r"\em" not in rendered
+    fallback = render_markdown(r"The route uses $\textbf { \unknown F }$.")
+    assert "math-fallback" in fallback
 
 
 def test_helpers() -> None:
@@ -281,11 +300,123 @@ def test_float_interrupting_a_sentence_is_moved_after_its_continuation(
         source=source_reference(),
         content_list_path=path,
     )
-    assert [block.kind for block in document.blocks] == [
-        "paragraph",
-        "paragraph",
-        "table",
+    assert [block.kind for block in document.blocks] == ["paragraph", "table"]
+    assert document.blocks[0].source == "We use the officially released ground-truth angles."
+    assert document.blocks[0].extra["origin_block_ids"] == ["b0001", "b0003"]
+    assert document.layout_info["automatic_paragraph_merges"] == 1
+
+
+def test_column_and_page_continuations_merge_across_leading_floats(tmp_path: Path) -> None:
+    payload = [
+        {
+            "type": "text",
+            "text": "Classical approaches include Matthews and",
+            "page_idx": 0,
+            "bbox": [81, 845, 480, 890],
+        },
+        {
+            "type": "text",
+            "text": "Baker 2004 and we exhaustively train",
+            "page_idx": 0,
+            "bbox": [514, 68, 915, 890],
+        },
+        {
+            "type": "table",
+            "table_body": "<table><tr><td>Result</td></tr></table>",
+            "page_idx": 1,
+            "bbox": [84, 65, 477, 501],
+        },
+        {
+            "type": "text",
+            "text": "17 variants of the network.",
+            "page_idx": 1,
+            "bbox": [81, 758, 480, 832],
+        },
     ]
+    path = tmp_path / "boundary_content_list.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    document = build_document(
+        job_id="boundary-job",
+        metadata=PaperMetadata(title="Boundary"),
+        source=source_reference(),
+        content_list_path=path,
+    )
+    assert [block.kind for block in document.blocks] == ["paragraph", "table"]
+    merged = document.blocks[0]
+    assert merged.id == "b0001"
+    assert merged.page == 0
+    assert merged.bbox == [81.0, 845.0, 480.0, 890.0]
+    assert merged.source == (
+        "Classical approaches include Matthews and Baker 2004 and we exhaustively train "
+        "17 variants of the network."
+    )
+    assert merged.extra["origin_block_ids"] == ["b0001", "b0002", "b0004"]
+    assert merged.extra["origin_pages"] == [0, 0, 1]
+    assert len(merged.extra["origin_bboxes"]) == 3
+    assert document.layout_info["automatic_paragraph_merges"] == 1
+
+    translations = {segment.id: segment.source for segment in document.segments}
+    html_path = build_paper(
+        document,
+        translations,
+        content_list_path=path,
+        library_root=tmp_path / "output" / "library",
+    )
+    assert "PDF 1-2" in html_path.read_text(encoding="utf-8")
+
+
+def test_paragraph_merging_stops_at_structure_and_terminal_punctuation(
+    tmp_path: Path,
+) -> None:
+    payload = [
+        {
+            "type": "text",
+            "text": "A fragment without punctuation",
+            "page_idx": 0,
+            "bbox": [81, 845, 480, 890],
+        },
+        {"type": "equation", "text": "x = 1", "page_idx": 0},
+        {
+            "type": "text",
+            "text": "A new paragraph.",
+            "page_idx": 0,
+            "bbox": [514, 68, 915, 150],
+        },
+        {
+            "type": "text",
+            "text": "A completed paragraph.",
+            "page_idx": 1,
+            "bbox": [81, 845, 480, 890],
+        },
+        {
+            "type": "text",
+            "text": "Another paragraph.",
+            "page_idx": 1,
+            "bbox": [514, 68, 915, 150],
+        },
+        {
+            "type": "text",
+            "text": "Ordinary adjacent fragment",
+            "page_idx": 2,
+            "bbox": [81, 100, 480, 160],
+        },
+        {
+            "type": "text",
+            "text": "Ordinary adjacent paragraph.",
+            "page_idx": 2,
+            "bbox": [81, 170, 480, 230],
+        },
+    ]
+    path = tmp_path / "non_merge_content_list.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    document = build_document(
+        job_id="non-merge-job",
+        metadata=PaperMetadata(title="Non merge"),
+        source=source_reference(),
+        content_list_path=path,
+    )
+    assert len(document.blocks) == len(payload)
+    assert document.layout_info["automatic_paragraph_merges"] == 0
 
 
 def test_composite_figure_and_page_notes_are_normalized(tmp_path: Path) -> None:

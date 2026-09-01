@@ -18,6 +18,10 @@ MATH_PATTERN = re.compile(
     r"\\\((?P<paren_inline>.*?)\\\)|(?<!\\)\$(?P<dollar_inline>[^$\n]+?)\$)",
     re.DOTALL,
 )
+RAW_TEX_IN_MATHML = re.compile(
+    r"<(?:mtext|mi|mo)\b[^>]*>[^<]*\\[A-Za-z]+",
+    re.IGNORECASE,
+)
 
 
 class RenderError(RuntimeError):
@@ -30,10 +34,82 @@ def _markdown_renderer() -> MarkdownIt:
     return renderer
 
 
+def _latex_group(value: str, start: int) -> tuple[str, int] | None:
+    if start >= len(value) or value[start] != "{":
+        return None
+    depth = 0
+    index = start
+    while index < len(value):
+        character = value[index]
+        if character == "\\" and index + 1 < len(value) and value[index + 1] in "{}":
+            index += 2
+            continue
+        if character == "{":
+            depth += 1
+        elif character == "}":
+            depth -= 1
+            if depth == 0:
+                return value[start + 1 : index], index
+        index += 1
+    return None
+
+
+def _legacy_em_payload(value: str) -> str | None:
+    stripped = value.strip()
+    if not stripped.startswith(r"\em"):
+        return None
+    suffix = stripped[3:]
+    if suffix and suffix[0].isalpha():
+        return None
+    return suffix.strip()
+
+
+def _normalize_latex_for_mathml(value: str) -> str:
+    """Rewrite legacy declaration-style font commands without changing source data."""
+    normalized: list[str] = []
+    index = 0
+    command = r"\textbf"
+    while index < len(value):
+        if value.startswith(command, index):
+            group_start = index + len(command)
+            while group_start < len(value) and value[group_start].isspace():
+                group_start += 1
+            group = _latex_group(value, group_start)
+            if group is not None:
+                inner, group_end = group
+                payload = _legacy_em_payload(inner)
+                if payload is not None:
+                    normalized.append(
+                        rf"\boldsymbol{{{_normalize_latex_for_mathml(payload)}}}"
+                    )
+                else:
+                    normalized.append(
+                        rf"\textbf{{{_normalize_latex_for_mathml(inner)}}}"
+                    )
+                index = group_end + 1
+                continue
+        if value[index] == "{":
+            group = _latex_group(value, index)
+            if group is not None:
+                inner, group_end = group
+                payload = _legacy_em_payload(inner)
+                if payload is not None:
+                    normalized.append(rf"{{\mathit{{{_normalize_latex_for_mathml(payload)}}}}}")
+                else:
+                    normalized.append(rf"{{{_normalize_latex_for_mathml(inner)}}}")
+                index = group_end + 1
+                continue
+        normalized.append(value[index])
+        index += 1
+    return "".join(normalized)
+
+
 def _mathml(latex: str, *, display: bool) -> str:
     value = latex.strip()
     try:
-        result = latex_to_mathml(value)
+        result = latex_to_mathml(_normalize_latex_for_mathml(value))
+        if RAW_TEX_IN_MATHML.search(result):
+            raise ValueError("MathML contains an unparsed TeX control sequence.")
     except Exception:  # noqa: BLE001 - malformed model output must remain readable
         klass = "math-display math-fallback" if display else "math-inline math-fallback"
         return f'<code class="{klass}">{html.escape(value)}</code>'
@@ -273,11 +349,25 @@ def _build_paper_page(
             }
             for member in block.members
         ]
+        origin_pages_raw = block.extra.get("origin_pages", [block.page])
+        origin_pages = (
+            [int(page) for page in origin_pages_raw]
+            if isinstance(origin_pages_raw, list) and origin_pages_raw
+            else [block.page]
+        )
+        page_start = min(origin_pages) + 1
+        page_end = max(origin_pages) + 1
+        page_label = (
+            f"PDF {page_start}"
+            if page_start == page_end
+            else f"PDF {page_start}-{page_end}"
+        )
         rendered = {
             "id": block.id,
             "kind": block.kind,
             "level": min(max(block.level, 1), 6),
             "page": block.page + 1,
+            "page_label": page_label,
             "source_html": source_html,
             "target_html": target_html,
             "asset": _copy_asset(block.asset, content_list_path.parent, media_dir),

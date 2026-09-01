@@ -156,32 +156,125 @@ def _repair_adjacent_captions(entries: list[dict[str, Any]]) -> list[dict[str, A
     return entries
 
 
-def _repair_interrupted_paragraphs(blocks: list[DocumentBlock]) -> list[DocumentBlock]:
-    """Move a same-page table/figure after a paragraph it visually interrupted.
+FLOAT_KINDS = {"figure", "figure_group", "table"}
+TERMINAL_PUNCTUATION = re.compile(r"[.!?。！？:：;；]['\"”’)]*$")
 
-    Two-column papers often place a floating table between two text fragments in
-    MinerU's reading order.  A fragment without terminal punctuation followed by
-    a float and another paragraph is a conservative signal that the sentence
-    should be completed before the float is shown in the reflowed document.
+
+def _valid_bbox(block: DocumentBlock) -> bool:
+    return len(block.bbox) == 4 and block.bbox[0] < block.bbox[2] and block.bbox[1] < block.bbox[3]
+
+
+def _page_bottoms(blocks: list[DocumentBlock]) -> dict[int, float]:
+    bottoms: dict[int, float] = {}
+    for block in blocks:
+        if _valid_bbox(block):
+            bottoms[block.page] = max(bottoms.get(block.page, block.bbox[3]), block.bbox[3])
+    return bottoms
+
+
+def _same_page_column_transition(before: DocumentBlock, after: DocumentBlock) -> bool:
+    """Return whether reading order reset from a left column to a right column."""
+    if before.page != after.page or not _valid_bbox(before) or not _valid_bbox(after):
+        return False
+    return before.bbox[2] <= after.bbox[0] and before.bbox[1] > after.bbox[1]
+
+
+def _next_page_transition(
+    before: DocumentBlock,
+    after: DocumentBlock,
+    *,
+    page_bottoms: dict[int, float],
+) -> bool:
+    """Return whether a paragraph tail reaches the next physical PDF page."""
+    if after.page != before.page + 1 or not _valid_bbox(before) or not _valid_bbox(after):
+        return False
+    page_bottom = page_bottoms.get(before.page, before.bbox[3])
+    page_height = max(page_bottom, 1.0)
+    bottom_tolerance = max(12.0, page_height * 0.05)
+    return page_bottom - before.bbox[3] <= bottom_tolerance
+
+
+def _is_paragraph_continuation(
+    before: DocumentBlock,
+    after: DocumentBlock,
+    *,
+    intervening_floats: list[DocumentBlock],
+    page_bottoms: dict[int, float],
+) -> bool:
+    if before.kind != "paragraph" or after.kind != "paragraph":
+        return False
+    if not before.source.strip() or TERMINAL_PUNCTUATION.search(before.source.strip()):
+        return False
+    if before.page == after.page:
+        return bool(intervening_floats) or _same_page_column_transition(before, after)
+    return _next_page_transition(before, after, page_bottoms=page_bottoms)
+
+
+def _merge_boundary_paragraphs(
+    blocks: list[DocumentBlock],
+) -> tuple[list[DocumentBlock], int]:
+    """Merge sentence fragments split by a float, column, or page boundary.
+
+    MinerU already provides reading order.  We only join a non-terminated paragraph
+    to the next paragraph when geometry proves a column/page transition, or when
+    only floating figures/tables interrupt the two fragments.  Structural blocks
+    such as headings and equations therefore remain hard boundaries.
     """
-    repaired = list(blocks)
+    page_bottoms = _page_bottoms(blocks)
+    merged_blocks: list[DocumentBlock] = []
+    merge_groups = 0
     index = 0
-    while index + 2 < len(repaired):
-        before, floating, after = repaired[index : index + 3]
-        same_page = before.page == floating.page == after.page
-        interrupted = (
-            before.kind == "paragraph"
-            and floating.kind in {"figure", "figure_group", "table"}
-            and after.kind == "paragraph"
-            and bool(before.source.strip())
-            and not re.search(r"[.!?。！？:：;；]['\"”’)]*$", before.source.strip())
-        )
-        if same_page and interrupted:
-            repaired[index + 1 : index + 3] = [after, floating]
-            index += 3
+    while index < len(blocks):
+        first = blocks[index]
+        if first.kind != "paragraph":
+            merged_blocks.append(first)
+            index += 1
             continue
-        index += 1
-    return repaired
+
+        merged = first.model_copy(deep=True)
+        tail = first
+        origin_blocks = [first]
+        deferred_floats: list[DocumentBlock] = []
+        cursor = index + 1
+        while cursor < len(blocks):
+            float_end = cursor
+            while float_end < len(blocks) and blocks[float_end].kind in FLOAT_KINDS:
+                float_end += 1
+            if float_end >= len(blocks):
+                break
+            continuation = blocks[float_end]
+            floats = blocks[cursor:float_end]
+            if not _is_paragraph_continuation(
+                tail,
+                continuation,
+                intervening_floats=floats,
+                page_bottoms=page_bottoms,
+            ):
+                break
+            merged.source = f"{merged.source.rstrip()} {continuation.source.lstrip()}"
+            origin_blocks.append(continuation)
+            deferred_floats.extend(floats)
+            tail = continuation
+            cursor = float_end + 1
+
+        if len(origin_blocks) == 1:
+            merged_blocks.append(first)
+            index += 1
+            continue
+
+        merged.extra.update(
+            {
+                "automatic_paragraph_merge": True,
+                "origin_block_ids": [block.id for block in origin_blocks],
+                "origin_pages": [block.page for block in origin_blocks],
+                "origin_bboxes": [block.bbox for block in origin_blocks],
+            }
+        )
+        merged_blocks.append(merged)
+        merged_blocks.extend(deferred_floats)
+        merge_groups += 1
+        index = cursor
+    return merged_blocks, merge_groups
 
 
 def _content_entries(payload: Any) -> list[dict[str, Any]]:
@@ -244,7 +337,7 @@ def build_document(
     ]
     overridden_blocks, override_count = apply_layout_overrides(grouped_blocks, overrides)
     body_blocks, front_notes, endnotes = _extract_notes(overridden_blocks)
-    body_blocks = _repair_interrupted_paragraphs(body_blocks)
+    body_blocks, paragraph_merge_count = _merge_boundary_paragraphs(body_blocks)
 
     blocks, front_notes, endnotes, segments = _assign_segments(
         body_blocks,
@@ -263,6 +356,7 @@ def build_document(
         layout_info={
             "content_sha256": content_sha256,
             "automatic_figure_groups": group_count,
+            "automatic_paragraph_merges": paragraph_merge_count,
             "dropped_empty_blocks": empty_count,
             "overrides_applied": override_count,
             "override_targets": override_targets,

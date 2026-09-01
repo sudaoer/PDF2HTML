@@ -45,3 +45,6 @@ verified.
 For a collection or tag, finish papers sequentially. A failure in one paper
 must not discard completed jobs. Reuse existing parse and translation artifacts
 when their recorded source hashes still match.
+
+# 代码编写与提交
+- 在任务完成后创建git提交

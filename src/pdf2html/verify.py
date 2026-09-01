@@ -16,6 +16,7 @@ class VerificationError(RuntimeError):
 
 
 SUBFIGURE_ONLY = re.compile(r"^\s*\([a-z]\)\s*$", re.IGNORECASE)
+TEX_CONTROL_SEQUENCE = re.compile(r"\\[A-Za-z]+")
 TEXT_KINDS = {"paragraph", "heading", "list", "aside", "page_footnote"}
 
 
@@ -148,7 +149,17 @@ def verify_output(
         errors.append("The document contains no bilingual content pairs.")
     fallback_math = len(soup.select(".math-fallback"))
     if fallback_math:
-        warnings.append(f"{fallback_math} formulas fell back to readable LaTeX text.")
+        errors.append(f"{fallback_math} formulas fell back to readable LaTeX text.")
+    raw_mathml_commands = [
+        node.get_text(" ", strip=True)
+        for node in soup.select("math mtext, math mi, math mo")
+        if TEX_CONTROL_SEQUENCE.search(node.get_text(" ", strip=True))
+    ]
+    if raw_mathml_commands:
+        errors.append(
+            "MathML contains unparsed TeX control sequences: "
+            f"{raw_mathml_commands[:3]}"
+        )
     expected_groups = sum(block.kind == "figure_group" for block in document.blocks)
     rendered_groups = soup.select("figure.figure-group")
     if len(rendered_groups) != expected_groups:
