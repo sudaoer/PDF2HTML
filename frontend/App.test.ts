@@ -196,6 +196,95 @@ describe("application routes", () => {
     expect(wrapper.find(".paper-body h3").text()).toBe("子节");
   });
 
+  it("keeps grouped keywords visible without adding them to the table of contents", async () => {
+    history.pushState({}, "", "/papers/keyword-paper/");
+    const block = (
+      id: string,
+      kind: string,
+      source: string,
+      level: number,
+      role = "",
+    ) => ({
+      id,
+      kind,
+      page: 0,
+      level,
+      source,
+      segment_id: role === "document_title" || role.startsWith("abstract_") ? "" : `${id}.text`,
+      asset: "",
+      caption_source: "",
+      caption_segment_id: "",
+      footnote_source: "",
+      footnote_segment_id: "",
+      members: [],
+      layout: "auto",
+      extra: role ? { front_matter_role: role } : {},
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse({
+          schema_version: 1,
+          bundle_revision: "sha256:keywords",
+          paper_id: "keyword-paper",
+          job_id: "job",
+          media: [],
+          translations: [
+            { id: "meta.title", source_hash: "a", target: "论文标题" },
+            { id: "meta.abstract", source_hash: "b", target: "中文摘要" },
+            {
+              id: "keywords.text",
+              source_hash: "c",
+              target: "关键词：医学影像；标志点检测",
+            },
+            { id: "introduction.text", source_hash: "d", target: "1. 引言" },
+          ],
+          document: {
+            job_id: "job",
+            metadata: {
+              title: "Keyword paper",
+              creators: [],
+              date: "",
+              publication: "",
+              doi: "",
+              url: "",
+              abstract: "English abstract",
+              tags: [],
+            },
+            segments: [],
+            front_matter_notes: [],
+            endnotes: [],
+            blocks: [
+              block("source-title", "heading", "Keyword paper", 1, "document_title"),
+              block("article-info", "heading", "ARTICLE INFO", 2),
+              block(
+                "keywords",
+                "paragraph",
+                "Keywords: Medical imaging; Landmark detection",
+                0,
+                "keywords",
+              ),
+              block("abstract-heading", "heading", "ABSTRACT", 2, "abstract_heading"),
+              block("abstract-body", "paragraph", "English abstract", 0, "abstract_body"),
+              block("introduction", "heading", "1. Introduction", 2),
+            ],
+          },
+        }),
+      ),
+    );
+    const wrapper = mount(App);
+    await flushPromises();
+    const keyword = wrapper.find(".paper-body #keywords");
+    expect(keyword.exists()).toBe(true);
+    expect(keyword.find(".target").text()).toBe("关键词：医学影像；标志点检测");
+    expect(keyword.find(".source").text()).toBe("Keywords: Medical imaging; Landmark detection");
+    expect(wrapper.findAll(".paper-body #keywords")).toHaveLength(1);
+    expect(wrapper.findAll(".toc-panel a").map((entry) => entry.text())).toEqual([
+      "1. 引言1. Introduction",
+    ]);
+    expect(wrapper.text()).not.toContain("ARTICLE INFO");
+  });
+
   it("renders HTTP search excerpts without interpreting markup", async () => {
     history.pushState({}, "", "/");
     vi.stubGlobal(

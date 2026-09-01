@@ -59,12 +59,14 @@ const visibleBlocks = computed(() => {
   const introduction = bodyBlocks.findIndex(
     (block) =>
       block.kind === "heading" &&
-      block.source.replace(/^\d+(?:\.\d+)*\s*/, "").trim().toLowerCase() === "introduction",
+      block.source.replace(/^\d+(?:\.\d+)*\.?\s*/, "").trim().toLowerCase() === "introduction",
   );
   if (introduction < 0) return bodyBlocks;
   return [
     ...bodyBlocks.slice(0, introduction).filter(
-      (block) => block.kind === "paragraph" && block.source.toLowerCase().includes("http"),
+      (block) =>
+        String(block.extra.front_matter_role ?? "") === "keywords" ||
+        (block.kind === "paragraph" && block.source.toLowerCase().includes("http")),
     ),
     ...bodyBlocks.slice(introduction),
   ];

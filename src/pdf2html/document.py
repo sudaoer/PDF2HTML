@@ -32,6 +32,12 @@ PROTECTED_PATTERNS = [
 ]
 
 SKIPPED_TYPES = {"header", "footer", "page_number"}
+KEYWORD_MARKER = re.compile(
+    r"^(?:keywords?|key\s+words?|index\s+terms)\s*[:：]\s*$",
+    re.IGNORECASE,
+)
+MAX_KEYWORD_ITEMS = 32
+MAX_KEYWORD_ITEM_CHARS = 160
 
 
 def _string(value: Any) -> str:
@@ -186,6 +192,102 @@ ARRAY_TRAILING_TAG = re.compile(
 
 def _valid_bbox(block: DocumentBlock) -> bool:
     return len(block.bbox) == 4 and block.bbox[0] < block.bbox[2] and block.bbox[1] < block.bbox[3]
+
+
+def _is_keyword_item(
+    anchor: DocumentBlock,
+    previous: DocumentBlock,
+    candidate: DocumentBlock,
+) -> bool:
+    if (
+        candidate.kind != "paragraph"
+        or candidate.page != anchor.page
+        or not _valid_bbox(anchor)
+        or not _valid_bbox(previous)
+        or not _valid_bbox(candidate)
+    ):
+        return False
+    text = candidate.source.strip()
+    if (
+        not text
+        or "\n" in text
+        or len(text) > MAX_KEYWORD_ITEM_CHARS
+        or KEYWORD_MARKER.fullmatch(text)
+    ):
+        return False
+
+    anchor_height = anchor.bbox[3] - anchor.bbox[1]
+    previous_height = previous.bbox[3] - previous.bbox[1]
+    candidate_height = candidate.bbox[3] - candidate.bbox[1]
+    left_tolerance = max(12.0, anchor_height * 1.5)
+    if abs(candidate.bbox[0] - anchor.bbox[0]) > left_tolerance:
+        return False
+    if candidate_height > max(36.0, anchor_height * 3.0):
+        return False
+
+    vertical_gap = candidate.bbox[1] - previous.bbox[3]
+    gap_tolerance = max(12.0, previous_height * 1.5, candidate_height * 1.5)
+    return -2.0 <= vertical_gap <= gap_tolerance
+
+
+def _group_keyword_blocks(
+    blocks: list[DocumentBlock],
+) -> tuple[list[DocumentBlock], int]:
+    grouped: list[DocumentBlock] = []
+    group_count = 0
+    index = 0
+    while index < len(blocks):
+        anchor = blocks[index]
+        if (
+            anchor.page != 0
+            or anchor.kind not in {"heading", "paragraph"}
+            or not KEYWORD_MARKER.fullmatch(anchor.source.strip())
+            or not _valid_bbox(anchor)
+        ):
+            grouped.append(anchor)
+            index += 1
+            continue
+
+        members = [anchor]
+        previous = anchor
+        cursor = index + 1
+        while cursor < len(blocks) and len(members) <= MAX_KEYWORD_ITEMS:
+            candidate = blocks[cursor]
+            if not _is_keyword_item(anchor, previous, candidate):
+                break
+            members.append(candidate)
+            previous = candidate
+            cursor += 1
+        if len(members) == 1:
+            grouped.append(anchor)
+            index += 1
+            continue
+
+        merged = anchor.model_copy(deep=True)
+        merged.kind = "paragraph"
+        merged.level = 0
+        merged.subtype = "keywords"
+        keyword_text = "; ".join(block.source.strip() for block in members[1:])
+        merged.source = f"{anchor.source.strip()} {keyword_text}"
+        merged.bbox = [
+            min(block.bbox[0] for block in members),
+            min(block.bbox[1] for block in members),
+            max(block.bbox[2] for block in members),
+            max(block.bbox[3] for block in members),
+        ]
+        merged.extra.update(
+            {
+                "front_matter_role": "keywords",
+                "automatic_keyword_group": True,
+                "origin_block_ids": [block.id for block in members],
+                "origin_pages": [block.page for block in members],
+                "origin_bboxes": [block.bbox for block in members],
+            }
+        )
+        grouped.append(merged)
+        group_count += 1
+        index = cursor
+    return grouped, group_count
 
 
 def _page_bottoms(blocks: list[DocumentBlock]) -> dict[int, float]:
@@ -566,6 +668,7 @@ def build_document(
 ) -> Document:
     entries = _content_entries(read_json(content_list_path))
     primitive_blocks = _primitive_blocks(entries)
+    primitive_blocks, keyword_group_count = _group_keyword_blocks(primitive_blocks)
     primitive_blocks, equation_tag_repair_count = _repair_equation_tags(primitive_blocks)
     heading_blocks, heading_info = normalize_heading_structure(
         primitive_blocks,
@@ -612,6 +715,7 @@ def build_document(
         layout_info={
             "content_sha256": content_sha256,
             "automatic_figure_groups": group_count,
+            "automatic_keyword_groups": keyword_group_count,
             "automatic_caption_repairs": caption_repair_count,
             "automatic_bare_subfigure_label_repairs": bare_label_repair_count,
             "automatic_equation_tag_repairs": equation_tag_repair_count,

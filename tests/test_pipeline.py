@@ -583,6 +583,122 @@ def test_mineru_v2_pages_are_flattened(tmp_path: Path) -> None:
     assert document.blocks[2].page == 1
 
 
+@pytest.mark.parametrize(
+    ("marker_type", "items", "expected"),
+    [
+        (
+            "paragraph",
+            [
+                "Medical imaging",
+                "Landmark detection",
+                "Foundation models",
+                "Echocardiography measurement estimation",
+            ],
+            "Keywords: Medical imaging; Landmark detection; Foundation models; "
+            "Echocardiography measurement estimation",
+        ),
+        (
+            "title",
+            [
+                "Scoliosis early screening",
+                "Scoliosis severity diagnosis",
+                "Back area detection",
+                "Class imbalance",
+                "Deep learning",
+            ],
+            "Keywords: Scoliosis early screening; Scoliosis severity diagnosis; "
+            "Back area detection; Class imbalance; Deep learning",
+        ),
+    ],
+)
+def test_split_keyword_lines_are_grouped_without_crossing_columns(
+    tmp_path: Path,
+    marker_type: str,
+    items: list[str],
+    expected: str,
+) -> None:
+    marker_content = (
+        {
+            "title_content": [{"type": "text", "content": "Keywords:"}],
+            "level": 1,
+        }
+        if marker_type == "title"
+        else {"paragraph_content": [{"type": "text", "content": "Keywords:"}]}
+    )
+    page = [
+        {
+            "type": "title",
+            "content": {
+                "title_content": [{"type": "text", "content": "ARTICLE INFO"}],
+                "level": 2,
+            },
+            "bbox": [58, 370, 268, 390],
+        },
+        {"type": marker_type, "content": marker_content, "bbox": [58, 400, 109, 410]},
+    ]
+    for offset, item in enumerate(items):
+        top = 410 + offset * 11
+        page.append(
+            {
+                "type": "paragraph",
+                "content": {
+                    "paragraph_content": [{"type": "text", "content": item}]
+                },
+                "bbox": [58, top, 260, top + 10],
+            }
+        )
+    abstract = "A long abstract in the adjacent right column must remain separate."
+    page.extend(
+        [
+            {
+                "type": "paragraph",
+                "content": {
+                    "paragraph_content": [{"type": "text", "content": abstract}]
+                },
+                "bbox": [332, 400, 937, 520],
+            },
+            {
+                "type": "title",
+                "content": {
+                    "title_content": [{"type": "text", "content": "1. Introduction"}],
+                    "level": 2,
+                },
+                "bbox": [58, 560, 200, 580],
+            },
+        ]
+    )
+    path = tmp_path / f"keywords-{marker_type}.json"
+    path.write_text(json.dumps([page]), encoding="utf-8")
+
+    document = build_document(
+        job_id=f"keywords-{marker_type}",
+        metadata=PaperMetadata(title="Keyword paper", abstract=abstract),
+        source=source_reference(),
+        content_list_path=path,
+    )
+
+    keyword = next(
+        block
+        for block in document.blocks
+        if block.extra.get("front_matter_role") == "keywords"
+    )
+    assert keyword.id == "b0002"
+    assert keyword.kind == "paragraph"
+    assert keyword.level == 0
+    assert keyword.subtype == "keywords"
+    assert keyword.source == expected
+    assert keyword.bbox == [58.0, 400.0, 260.0, float(420 + (len(items) - 1) * 11)]
+    assert keyword.extra["origin_block_ids"] == [
+        f"b{index:04d}" for index in range(2, len(items) + 3)
+    ]
+    assert document.layout_info["automatic_keyword_groups"] == 1
+    assert any(block.source == abstract for block in document.blocks)
+    assert not any(
+        block.kind == "heading" and block.source == "Keywords:"
+        for block in document.blocks
+    )
+
+
 def test_shifted_adjacent_table_and_figure_captions_are_repaired(tmp_path: Path) -> None:
     payload = [
         [
