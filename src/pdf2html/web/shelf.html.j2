@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>双语论文书架</title>
+  <link rel="stylesheet" href="assets/app.css">
+  <script defer src="assets/app.js"></script>
+</head>
+<body class="shelf-page">
+  <main class="shelf">
+    <header class="shelf-hero">
+      <p class="eyebrow">Local bilingual library</p>
+      <h1>双语论文书架</h1>
+      <p>由 Zotero、MinerU 与 Codex 生成的离线流式阅读版本。</p>
+      <label class="search-box"><span>搜索</span><input type="search" data-shelf-search placeholder="标题、作者、年份或标签"></label>
+    </header>
+    <section class="paper-grid" aria-live="polite">
+    {% for paper in papers %}
+      <article class="paper-card" data-search="{{ paper.title }} {{ paper.title_zh }} {{ paper.creators | join(' ') }} {{ paper.date }} {{ paper.tags | join(' ') }}">
+        <p class="paper-year">{{ paper.date }}</p>
+        <h2><a href="{{ paper.href }}">{{ paper.title_zh }}</a></h2>
+        <p class="card-original" lang="en">{{ paper.title }}</p>
+        <p class="card-authors">{{ paper.creators | join(', ') }}</p>
+        {% if paper.publication %}<p class="card-publication">{{ paper.publication }}</p>{% endif %}
+      </article>
+    {% endfor %}
+    {% if not papers %}<p class="empty-state">还没有完成的论文。</p>{% endif %}
+    </section>
+  </main>
+</body>
+</html>

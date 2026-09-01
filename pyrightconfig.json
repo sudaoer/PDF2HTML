@@ -1,0 +1,8 @@
+{
+  "include": ["src", "tests"],
+  "extraPaths": ["src"],
+  "venvPath": ".pixi/envs",
+  "venv": "default",
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "standard"
+}

@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{{ title_zh }} · {{ document.metadata.title }}</title>
+  <link rel="stylesheet" href="../../assets/app.css">
+  <script defer src="../../assets/app.js"></script>
+</head>
+<body class="paper-page mode-bilingual">
+  <header class="reader-bar">
+    <a class="shelf-link" href="../../index.html" aria-label="返回论文书架">← 书架</a>
+    <div class="reader-controls" role="group" aria-label="阅读设置">
+      <button type="button" data-mode="bilingual" aria-pressed="true">双语</button>
+      <button type="button" data-mode="target" aria-pressed="false">中文</button>
+      <button type="button" data-mode="source" aria-pressed="false">原文</button>
+      <button type="button" data-font="down" aria-label="缩小字号">A−</button>
+      <button type="button" data-font="up" aria-label="放大字号">A+</button>
+      <button type="button" data-theme-toggle aria-label="切换明暗主题">◐</button>
+    </div>
+    <div class="reading-progress" aria-hidden="true"><span></span></div>
+  </header>
+
+  <div class="reader-layout">
+    <aside class="toc-panel" aria-label="论文目录">
+      <p class="eyebrow">Contents</p>
+      <nav>
+      {% for item in toc %}
+        <a class="toc-level-{{ item.level }}" href="#{{ item.id }}">
+          <span lang="zh-CN">{{ item.target }}</span>
+          <small lang="en">{{ item.source }}</small>
+        </a>
+      {% endfor %}
+      </nav>
+    </aside>
+
+    <main class="paper" id="main-content">
+      <article>
+        <header class="paper-hero">
+          <p class="eyebrow">Bilingual paper · 双语论文</p>
+          <h1 lang="zh-CN">{{ title_zh }}</h1>
+          <p class="original-title" lang="en">{{ document.metadata.title }}</p>
+          <p class="byline">{{ document.metadata.creators | join(', ') }}</p>
+          <dl class="paper-meta">
+            {% if document.metadata.publication %}<div><dt>来源</dt><dd>{{ document.metadata.publication }}</dd></div>{% endif %}
+            {% if document.metadata.date %}<div><dt>日期</dt><dd>{{ document.metadata.date }}</dd></div>{% endif %}
+            {% if document.metadata.doi %}<div><dt>DOI</dt><dd><a href="https://doi.org/{{ document.metadata.doi }}">{{ document.metadata.doi }}</a></dd></div>{% endif %}
+          </dl>
+        </header>
+
+        {% if document.metadata.abstract %}
+        <section class="abstract pair" id="abstract">
+          <div class="target" lang="zh-CN"><h2>摘要</h2>{{ abstract_zh_html | safe }}</div>
+          <div class="source" lang="en"><h2>Abstract</h2>{{ abstract_source_html | safe }}</div>
+        </section>
+        {% endif %}
+
+        <section class="paper-body">
+        {% for block in blocks %}
+          {% if block.kind == 'heading' %}
+          <section class="heading-pair pair" id="{{ block.id }}" data-page="{{ block.page }}">
+            <div class="target" lang="zh-CN"><h{{ block.level }}>{{ block.target_html | safe }}</h{{ block.level }}></div>
+            <div class="source" lang="en"><h{{ block.level }}>{{ block.source_html | safe }}</h{{ block.level }}></div>
+          </section>
+          {% elif block.kind == 'figure' %}
+          <figure id="{{ block.id }}" data-page="{{ block.page }}">
+            {% if block.asset %}<button class="figure-open" type="button" aria-label="放大图片"><img src="{{ block.asset }}" alt="论文图，第 {{ block.page }} 页" loading="lazy"></button>{% endif %}
+            {% if block.caption_source_html or block.caption_target_html %}
+            <figcaption class="pair">
+              <div class="target" lang="zh-CN">{{ block.caption_target_html | safe }}</div>
+              <div class="source" lang="en">{{ block.caption_source_html | safe }}</div>
+            </figcaption>
+            {% endif %}
+            {% if block.footnote_source_html or block.footnote_target_html %}
+            <div class="figure-note pair">
+              <div class="target" lang="zh-CN">{{ block.footnote_target_html | safe }}</div>
+              <div class="source" lang="en">{{ block.footnote_source_html | safe }}</div>
+            </div>
+            {% endif %}
+            <span class="page-marker">PDF {{ block.page }}</span>
+          </figure>
+          {% elif block.kind == 'table' %}
+          <section class="table-block" id="{{ block.id }}" data-page="{{ block.page }}">
+            {% if block.caption_source_html or block.caption_target_html %}
+            <div class="table-caption pair">
+              <div class="target" lang="zh-CN">{{ block.caption_target_html | safe }}</div>
+              <div class="source" lang="en">{{ block.caption_source_html | safe }}</div>
+            </div>
+            {% endif %}
+            <div class="pair table-pair">
+              <div class="target table-scroll" lang="zh-CN">{{ block.target_html | safe }}</div>
+              <div class="source table-scroll" lang="en">{{ block.source_html | safe }}</div>
+            </div>
+            {% if block.asset %}<img class="table-fallback" src="{{ block.asset }}" alt="原始表格，第 {{ block.page }} 页" loading="lazy">{% endif %}
+            <span class="page-marker">PDF {{ block.page }}</span>
+          </section>
+          {% elif block.kind in ['equation', 'code', 'reference'] %}
+          <section class="source-only {{ block.kind }}" id="{{ block.id }}" data-page="{{ block.page }}" lang="en">
+            {{ block.source_html | safe }}
+            <span class="page-marker">PDF {{ block.page }}</span>
+          </section>
+          {% else %}
+          <section class="text-pair pair {{ block.kind }}" id="{{ block.id }}" data-page="{{ block.page }}">
+            <div class="target" lang="zh-CN">{{ block.target_html | safe }}</div>
+            <div class="source" lang="en">{{ block.source_html | safe }}</div>
+            <span class="page-marker">PDF {{ block.page }}</span>
+          </section>
+          {% endif %}
+        {% endfor %}
+        </section>
+      </article>
+    </main>
+  </div>
+
+  <dialog class="image-dialog"><button type="button" aria-label="关闭图片">×</button><img alt="放大的论文图片"></dialog>
+</body>
+</html>

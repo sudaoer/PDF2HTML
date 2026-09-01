@@ -1,3 +1,17 @@
 # pixi environments
 .pixi/*
 !.pixi/config.toml
+
+# Generated papers, caches, and local diagnostics
+.work/
+output/
+tmp/
+.pytest_cache/
+.ruff_cache/
+.pyright/
+__pycache__/
+*.py[cod]
+
+# MinerU model/runtime state when redirected into the workspace
+models/
+mineru.json
