@@ -2,10 +2,11 @@
 import { computed } from "vue";
 
 import { renderEquation, renderRich } from "./rendering";
-import type { DocumentBlock } from "./types";
+import type { DocumentBlock, ReaderMode } from "./types";
 
 const props = defineProps<{
   block: DocumentBlock;
+  mode: ReaderMode;
   paperId: string;
   translations: Record<string, string>;
   media: Record<string, string>;
@@ -19,6 +20,11 @@ const captionTarget = computed(
 const footnoteTarget = computed(
   () => props.translations[props.block.footnote_segment_id] ?? "",
 );
+const tableContent = computed(() =>
+  props.mode === "target" ? target.value : props.block.source,
+);
+const tableLanguage = computed(() => (props.mode === "target" ? "zh-CN" : "en"));
+const tableModeClass = computed(() => (props.mode === "target" ? "target" : "source"));
 const headingLevel = computed(() => Math.min(6, Math.max(1, props.block.level || 1)));
 const heading = computed(() => `h${headingLevel.value}`);
 const pages = computed(() => {
@@ -113,16 +119,13 @@ const media = (asset: string) => {
       <div class="source" lang="en" v-html="renderRich(block.caption_source)" />
     </div>
     <div class="pair table-pair">
-      <div class="target table-scroll" lang="zh-CN" v-html="renderRich(target, true)" />
-      <div class="source table-scroll" lang="en" v-html="renderRich(block.source, true)" />
+      <div
+        class="table-scroll"
+        :class="tableModeClass"
+        :lang="tableLanguage"
+        v-html="renderRich(tableContent, true)"
+      />
     </div>
-    <img
-      v-if="block.asset"
-      class="table-fallback"
-      :src="media(block.asset)"
-      :alt="`原始表格，第 ${block.page + 1} 页`"
-      loading="lazy"
-    >
     <span class="page-marker">{{ pages }}</span>
   </section>
 

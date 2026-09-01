@@ -8,3 +8,4 @@
 .search-results { display: grid; gap: 1rem; margin: -1.5rem 0 3rem; }
 .search-hit { padding: 1.25rem 1.5rem; border: 1px solid var(--line); border-radius: 1rem; background: var(--surface); }
 .search-hit h2, .search-hit p { margin: .35rem 0; }
+.table-pair > .source { padding-top: 0; border-top: 0; color: var(--ink); font-size: 1em; }

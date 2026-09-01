@@ -1,3 +1,5 @@
+export type ReaderMode = "bilingual" | "target" | "source";
+
 export interface PaperMetadata {
   title: string;
   creators: string[];

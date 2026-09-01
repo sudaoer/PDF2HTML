@@ -3,9 +3,13 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import PaperBlock from "./PaperBlock.vue";
 import { renderRich } from "./rendering";
-import type { PaperBundle, SearchResponse, SearchResult, ShelfResponse } from "./types";
-
-type Mode = "bilingual" | "target" | "source";
+import type {
+  PaperBundle,
+  ReaderMode,
+  SearchResponse,
+  SearchResult,
+  ShelfResponse,
+} from "./types";
 
 function savedTheme(): string {
   try {
@@ -24,7 +28,7 @@ const bundle = ref<PaperBundle | null>(null);
 const query = ref("");
 const matches = ref<string[] | null>(null);
 const searchResults = ref<SearchResult[]>([]);
-const mode = ref<Mode>("bilingual");
+const mode = ref<ReaderMode>("bilingual");
 const readerSize = ref(18);
 const theme = ref(savedTheme());
 const progress = ref(0);
@@ -263,6 +267,7 @@ onBeforeUnmount(() => {
               v-for="block in visibleBlocks"
               :key="block.id"
               :block="block"
+              :mode="mode"
               :paper-id="bundle.paper_id"
               :translations="translations"
               :media="media"
