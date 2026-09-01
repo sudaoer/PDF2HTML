@@ -11,8 +11,9 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from latex2mathml.converter import convert as latex_to_mathml
 from markdown_it import MarkdownIt
 
+from .bundle import bundle_shelf_record
 from .models import Document
-from .util import atomic_write_json, atomic_write_text, read_json, slugify
+from .util import atomic_write_text, read_json, slugify
 
 MATH_PATTERN = re.compile(
     r"(\$\$(?P<dollar_display>.*?)\$\$|\\\[(?P<bracket_display>.*?)\\\]|"
@@ -310,21 +311,6 @@ def build_paper(
         asset_prefix="../../assets",
         preview=False,
     )
-    metadata_title_zh = translations["meta.title"]
-    paper_manifest = {
-        "paper_id": paper_id,
-        "job_id": document.job_id,
-        "item_key": document.source.item_key,
-        "title": document.metadata.title,
-        "title_zh": metadata_title_zh,
-        "creators": document.metadata.creators,
-        "date": document.metadata.date,
-        "publication": document.metadata.publication,
-        "doi": document.metadata.doi,
-        "tags": document.metadata.tags,
-        "href": f"papers/{paper_id}/index.html",
-    }
-    atomic_write_json(paper_dir / "paper.json", paper_manifest)
     _write_shared_assets(library_root)
     build_shelf(library_root)
     return html_path
@@ -550,7 +536,7 @@ def build_shelf(library_root: Path) -> Path:
         for manifest_path in sorted(papers_root.glob("*/paper.json")):
             raw = read_json(manifest_path)
             if isinstance(raw, dict):
-                papers.append(raw)
+                papers.append(bundle_shelf_record(raw))
     papers.sort(
         key=lambda item: (str(item.get("date", "")), str(item.get("title", ""))),
         reverse=True,

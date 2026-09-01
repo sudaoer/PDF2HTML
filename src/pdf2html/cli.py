@@ -10,6 +10,7 @@ import httpx
 import typer
 from pydantic import ValidationError
 
+from .bundle import BundleError, build_bundle
 from .document import build_document, write_document
 from .layout import LayoutOverrideError, load_layout_overrides
 from .mineru_runner import (
@@ -18,7 +19,14 @@ from .mineru_runner import (
     mineru_version,
     run_mineru,
 )
-from .models import Document, Glossary, JobManifest, MinerURecord, SourceReference
+from .models import (
+    Document,
+    Glossary,
+    JobManifest,
+    MinerURecord,
+    SourceReference,
+    migrate_job_manifest,
+)
 from .render import build_layout_preview, build_paper
 from .translations import (
     TranslationError,
@@ -62,10 +70,11 @@ def _load_manifest(job_id: str) -> JobManifest:
     path = _manifest_path(job_id)
     if not path.is_file():
         raise typer.BadParameter(f"Unknown job: {job_id}")
-    return JobManifest.model_validate(read_json(path))
+    return JobManifest.model_validate(migrate_job_manifest(read_json(path)))
 
 
 def _save_manifest(manifest: JobManifest) -> None:
+    manifest.schema_version = 3
     manifest.updated_at = utc_now()
     atomic_write_json(_manifest_path(manifest.job_id), manifest.model_dump(mode="json"))
 
@@ -314,7 +323,7 @@ def _prepare_one(
     )
     manifest_path = _manifest_path(job_id)
     if manifest_path.is_file():
-        manifest = JobManifest.model_validate(read_json(manifest_path))
+        manifest = JobManifest.model_validate(migrate_job_manifest(read_json(manifest_path)))
         manifest.status = "parsing"
         manifest.error = ""
         manifest.source = source
@@ -489,6 +498,12 @@ def build_command(
         content_list_path = _root() / manifest.mineru.content_list_path
         document = _load_finalized_document(manifest)
         translations = load_translations(document, translation_dir)
+        bundle = build_bundle(
+            document,
+            translations,
+            content_list_path=content_list_path,
+            library_root=_root() / "output" / "library",
+        )
         html_path = build_paper(
             document,
             translations,
@@ -496,11 +511,15 @@ def build_command(
             library_root=_root() / "output" / "library",
         )
         manifest.output_path = relative_to(html_path, _root())
+        manifest.legacy_html_path = manifest.output_path
+        manifest.bundle_path = relative_to(bundle.bundle_path, _root())
+        manifest.bundle_revision = bundle.revision
         manifest.status = "built"
         manifest.error = ""
         _save_manifest(manifest)
-        typer.echo(f"Built {html_path}")
-    except (ValidationError, TranslationError, OSError, ValueError) as exc:
+        typer.echo(f"Built bundle {bundle.bundle_path} ({bundle.revision})")
+        typer.echo(f"Built legacy HTML {html_path}")
+    except (BundleError, ValidationError, TranslationError, OSError, ValueError) as exc:
         typer.echo(f"ERROR: {exc}", err=True)
         raise typer.Exit(1) from exc
 
@@ -546,7 +565,7 @@ def status(
     for path in paths:
         if not path.is_file():
             continue
-        manifest = JobManifest.model_validate(read_json(path))
+        manifest = JobManifest.model_validate(migrate_job_manifest(read_json(path)))
         records.append(
             {
                 "job_id": manifest.job_id,

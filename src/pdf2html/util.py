@@ -49,6 +49,27 @@ def atomic_write_json(path: Path, payload: Any) -> None:
     atomic_write_text(path, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
 
 
+def canonical_json_bytes(payload: Any, *, indent: int | None = None) -> bytes:
+    separators = None if indent is not None else (",", ":")
+    return (
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            indent=indent,
+            separators=separators,
+            sort_keys=True,
+        )
+        + "\n"
+    ).encode("utf-8")
+
+
+def atomic_write_bytes(path: Path, content: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_bytes(content)
+    os.replace(temporary, path)
+
+
 def relative_to(path: Path, root: Path) -> str:
     try:
         return path.resolve().relative_to(root.resolve()).as_posix()

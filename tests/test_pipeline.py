@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from bs4 import BeautifulSoup
 
+from pdf2html.bundle import BundleError, PaperBundle, build_bundle
 from pdf2html.document import build_document, write_document, write_translation_tasks
 from pdf2html.layout import LayoutOverrideError, apply_layout_overrides, block_fingerprint
 from pdf2html.models import (
@@ -18,6 +19,7 @@ from pdf2html.models import (
     PaperMetadata,
     SourceReference,
     TranslationFile,
+    migrate_job_manifest,
 )
 from pdf2html.render import _parse_equation, build_paper, render_equation, render_markdown
 from pdf2html.translations import (
@@ -147,6 +149,93 @@ def test_document_tasks_render_and_verify(tmp_path: Path) -> None:
             html_path,
             tmp_path / "verification-with-fallback.json",
         )
+
+
+def test_markdown_bundle_is_deterministic_and_self_contained(tmp_path: Path) -> None:
+    document, content_path = prepared_document(tmp_path)
+    task_dir = tmp_path / "tasks"
+    translation_dir = tmp_path / "translations"
+    write_translation_tasks(document, task_dir)
+    fill_tasks(task_dir, translation_dir)
+    translations = load_translations(document, translation_dir)
+    library_root = tmp_path / "output" / "library"
+
+    first = build_bundle(
+        document,
+        translations,
+        content_list_path=content_path,
+        library_root=library_root,
+    )
+    first_bytes = {
+        path.relative_to(first.paper_dir).as_posix(): path.read_bytes()
+        for path in sorted(first.paper_dir.rglob("*"))
+        if path.is_file()
+    }
+    second = build_bundle(
+        document,
+        translations,
+        content_list_path=content_path,
+        library_root=library_root,
+    )
+    second_bytes = {
+        path.relative_to(second.paper_dir).as_posix(): path.read_bytes()
+        for path in sorted(second.paper_dir.rglob("*"))
+        if path.is_file()
+    }
+
+    assert first.revision == second.revision
+    assert first_bytes == second_bytes
+    bundle = PaperBundle.model_validate(read_json(first.bundle_path))
+    assert bundle.document == document
+    assert {entry.id: entry.target for entry in bundle.translations} == translations
+    assert bundle.document_sha256 == hash_text(
+        json.dumps(
+            document.model_dump(mode="json"),
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        + "\n"
+    )
+    english = (first.paper_dir / "paper.en.md").read_text(encoding="utf-8")
+    chinese = (first.paper_dir / "paper.zh-CN.md").read_text(encoding="utf-8")
+    paragraph = next(block for block in document.blocks if block.kind == "paragraph")
+    assert f'bundle_revision: "{first.revision}"' in english
+    assert (
+        f'<!-- pdf2html:block id="{paragraph.id}" kind="paragraph" page="1" -->'
+        in english
+    )
+    assert f'<a id="block-{paragraph.id}"></a>' in english
+    assert "译文：Accuracy" in chinese
+    assert len(bundle.media) == 1
+    assert bundle.media[0].path.startswith("media/")
+    assert (first.paper_dir / bundle.media[0].path).is_file()
+
+
+def test_bundle_rejects_media_path_traversal(tmp_path: Path) -> None:
+    document, content_path = prepared_document(tmp_path)
+    translations = {segment.id: f"译文：{segment.source}" for segment in document.segments}
+    figure = next(block for block in document.blocks if block.kind == "figure")
+    figure.asset = "../outside.png"
+    with pytest.raises(BundleError, match="Unsafe MinerU media path"):
+        build_bundle(
+            document,
+            translations,
+            content_list_path=content_path,
+            library_root=tmp_path / "output" / "library",
+        )
+
+
+def test_job_manifest_v1_migrates_to_bundle_fields() -> None:
+    payload = {
+        "schema_version": 1,
+        "output_path": "output/library/papers/example/index.html",
+    }
+    migrated = migrate_job_manifest(payload)
+    assert migrated["schema_version"] == 3
+    assert migrated["legacy_html_path"] == payload["output_path"]
+    assert migrated["bundle_path"] == ""
+    assert migrated["bundle_revision"] == ""
 
 
 @pytest.mark.parametrize(
