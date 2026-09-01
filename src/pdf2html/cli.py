@@ -54,7 +54,7 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
-LAYOUT_PIPELINE_VERSION = "4"
+LAYOUT_PIPELINE_VERSION = "5"
 
 
 def _root() -> Path:

@@ -203,6 +203,19 @@ def _same_page_column_transition(before: DocumentBlock, after: DocumentBlock) ->
     return before.bbox[2] <= after.bbox[0] and before.bbox[1] > after.bbox[1]
 
 
+def _reaches_page_bottom(
+    block: DocumentBlock,
+    *,
+    page_bottoms: dict[int, float],
+) -> bool:
+    if not _valid_bbox(block):
+        return False
+    page_bottom = page_bottoms.get(block.page, block.bbox[3])
+    page_height = max(page_bottom, 1.0)
+    bottom_tolerance = max(12.0, page_height * 0.05)
+    return page_bottom - block.bbox[3] <= bottom_tolerance
+
+
 def _next_page_transition(
     before: DocumentBlock,
     after: DocumentBlock,
@@ -210,12 +223,33 @@ def _next_page_transition(
     page_bottoms: dict[int, float],
 ) -> bool:
     """Return whether a paragraph tail reaches the next physical PDF page."""
-    if after.page != before.page + 1 or not _valid_bbox(before) or not _valid_bbox(after):
+    if after.page != before.page + 1 or not _valid_bbox(after):
         return False
-    page_bottom = page_bottoms.get(before.page, before.bbox[3])
-    page_height = max(page_bottom, 1.0)
-    bottom_tolerance = max(12.0, page_height * 0.05)
-    return page_bottom - before.bbox[3] <= bottom_tolerance
+    return _reaches_page_bottom(before, page_bottoms=page_bottoms)
+
+
+def _multi_page_float_transition(
+    before: DocumentBlock,
+    after: DocumentBlock,
+    *,
+    intervening_floats: list[DocumentBlock],
+    page_bottoms: dict[int, float],
+) -> bool:
+    """Return whether floats occupy every page skipped by a paragraph continuation."""
+    if (
+        after.page <= before.page + 1
+        or not intervening_floats
+        or not _valid_bbox(after)
+        or not _reaches_page_bottom(before, page_bottoms=page_bottoms)
+    ):
+        return False
+    float_pages = [block.page for block in intervening_floats]
+    if float_pages != sorted(float_pages):
+        return False
+    if any(page < before.page or page > after.page for page in float_pages):
+        return False
+    skipped_pages = set(range(before.page + 1, after.page))
+    return skipped_pages.issubset(float_pages)
 
 
 def _is_paragraph_continuation(
@@ -231,7 +265,14 @@ def _is_paragraph_continuation(
         return False
     if before.page == after.page:
         return bool(intervening_floats) or _same_page_column_transition(before, after)
-    return _next_page_transition(before, after, page_bottoms=page_bottoms)
+    if _next_page_transition(before, after, page_bottoms=page_bottoms):
+        return True
+    return _multi_page_float_transition(
+        before,
+        after,
+        intervening_floats=intervening_floats,
+        page_bottoms=page_bottoms,
+    )
 
 
 def _merge_boundary_paragraphs(

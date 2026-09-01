@@ -703,6 +703,97 @@ def test_column_and_page_continuations_merge_across_leading_floats(tmp_path: Pat
     assert "PDF 1-2" in html_path.read_text(encoding="utf-8")
 
 
+def test_multi_page_figure_run_merges_sentence_continuation(tmp_path: Path) -> None:
+    images = tmp_path / "images"
+    images.mkdir()
+    for name in ("full-page.png", "leading.png"):
+        (images / name).write_bytes(b"\x89PNG\r\n\x1a\nfixture")
+    payload = [
+        {
+            "type": "text",
+            "text": "Our model uses only unclothed",
+            "page_idx": 0,
+            "bbox": [502, 900, 927, 945],
+        },
+        {
+            "type": "image",
+            "img_path": "images/full-page.png",
+            "caption": "Fig. 1 Full-page methods.",
+            "page_idx": 1,
+            "bbox": [70, 60, 930, 930],
+        },
+        {
+            "type": "image",
+            "img_path": "images/leading.png",
+            "caption": "Fig. 2 Leading results.",
+            "page_idx": 2,
+            "bbox": [70, 60, 930, 500],
+        },
+        {
+            "type": "text",
+            "text": "back images for screening.",
+            "page_idx": 2,
+            "bbox": [70, 590, 490, 700],
+        },
+    ]
+    path = tmp_path / "multi_page_float_content_list.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    document = build_document(
+        job_id="multi-page-float-job",
+        metadata=PaperMetadata(title="Multi-page floats"),
+        source=source_reference(),
+        content_list_path=path,
+    )
+
+    assert [block.kind for block in document.blocks] == ["paragraph", "figure", "figure"]
+    merged = document.blocks[0]
+    assert merged.source == "Our model uses only unclothed back images for screening."
+    assert merged.extra["origin_block_ids"] == ["b0001", "b0004"]
+    assert merged.extra["origin_pages"] == [0, 2]
+    assert document.layout_info["automatic_paragraph_merges"] == 1
+
+
+def test_multi_page_continuation_requires_float_on_every_skipped_page(
+    tmp_path: Path,
+) -> None:
+    image = tmp_path / "leading.png"
+    image.write_bytes(b"\x89PNG\r\n\x1a\nfixture")
+    payload = [
+        {
+            "type": "text",
+            "text": "A fragment at the page boundary",
+            "page_idx": 0,
+            "bbox": [502, 900, 927, 945],
+        },
+        {
+            "type": "image",
+            "img_path": "leading.png",
+            "caption": "Fig. 1 Appears only on the continuation page.",
+            "page_idx": 2,
+            "bbox": [70, 60, 930, 500],
+        },
+        {
+            "type": "text",
+            "text": "An unrelated paragraph.",
+            "page_idx": 2,
+            "bbox": [70, 590, 490, 700],
+        },
+    ]
+    path = tmp_path / "missing_float_page_content_list.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    document = build_document(
+        job_id="missing-float-page-job",
+        metadata=PaperMetadata(title="Missing float page"),
+        source=source_reference(),
+        content_list_path=path,
+    )
+
+    assert [block.kind for block in document.blocks] == ["paragraph", "figure", "paragraph"]
+    assert document.layout_info["automatic_paragraph_merges"] == 0
+
+
 def test_paragraph_merging_stops_at_structure_and_terminal_punctuation(
     tmp_path: Path,
 ) -> None:
