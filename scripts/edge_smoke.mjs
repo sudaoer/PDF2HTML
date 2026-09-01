@@ -94,6 +94,53 @@ async function screenshot(name) {
   await writeFile(new URL(name, outputDir), Buffer.from(result.data, "base64"));
 }
 
+function assertReferenceLayout(viewport, metrics) {
+  if (metrics.count < 2) {
+    throw new Error(`${viewport} paper contains fewer than two reference entries.`);
+  }
+  if (metrics.borderTopWidth !== 0 || metrics.paddingTop !== 0 || metrics.borderRadius !== 0) {
+    throw new Error(`${viewport} reference entries still use card chrome.`);
+  }
+  if (!metrics.transparentBackground) {
+    throw new Error(`${viewport} reference entries do not have a transparent background.`);
+  }
+  if (metrics.textIndent >= 0 || metrics.itemPaddingLeft <= 0) {
+    throw new Error(`${viewport} reference entries do not use a hanging indent.`);
+  }
+  if (metrics.gapToNext > 24) {
+    throw new Error(`${viewport} reference gap is ${metrics.gapToNext}px; expected at most 24px.`);
+  }
+  if (metrics.scrollWidth > metrics.clientWidth) {
+    throw new Error(
+      `${viewport} references overflow horizontally: ${metrics.scrollWidth}px > `
+        + `${metrics.clientWidth}px.`,
+    );
+  }
+}
+
+const referenceLayoutExpression = `(() => {
+  const references = [...document.querySelectorAll('.reference')];
+  const first = references[0];
+  const second = references[1];
+  const item = first.querySelector('li');
+  const style = getComputedStyle(first);
+  const itemStyle = getComputedStyle(item);
+  const background = style.backgroundColor;
+  return {
+    count: references.length,
+    borderTopWidth: Number.parseFloat(style.borderTopWidth),
+    paddingTop: Number.parseFloat(style.paddingTop),
+    borderRadius: Number.parseFloat(style.borderTopLeftRadius),
+    transparentBackground: background === 'transparent' || background.endsWith(', 0)'),
+    textIndent: Number.parseFloat(itemStyle.textIndent),
+    itemPaddingLeft: Number.parseFloat(itemStyle.paddingLeft),
+    gapToNext: Math.round(second.getBoundingClientRect().top - first.getBoundingClientRect().bottom),
+    clientWidth: document.documentElement.clientWidth,
+    scrollWidth: document.documentElement.scrollWidth,
+    theme: document.documentElement.dataset.theme
+  };
+})()`;
+
 const report = {};
 await cdp.send("Emulation.setDeviceMetricsOverride", {
   width: 390,
@@ -143,6 +190,15 @@ report.themeToggle = await evaluate(`(() => {
 })()`);
 await screenshot("cdp-mobile-paper.png");
 
+const referenceId = await evaluate("document.querySelector('.reference[id]')?.id ?? ''");
+if (!referenceId) throw new Error("The paper does not contain a reference entry.");
+const referenceUrl = new URL(paperUrl);
+referenceUrl.hash = referenceId;
+await navigate(referenceUrl.href);
+report.mobileReference = await evaluate(referenceLayoutExpression);
+assertReferenceLayout("Mobile", report.mobileReference);
+await screenshot("cdp-mobile-references.png");
+
 await cdp.send("Emulation.setDeviceMetricsOverride", {
   width: 1440,
   height: 1000,
@@ -189,6 +245,17 @@ if (Math.abs(report.mobile.titleFontPx - 32) > 0.1) {
   throw new Error(`Mobile title font is ${report.mobile.titleFontPx}px; expected 32px.`);
 }
 await screenshot("cdp-desktop-paper-top.png");
+
+await navigate(referenceUrl.href);
+report.desktopReference = await evaluate(referenceLayoutExpression);
+assertReferenceLayout("Desktop", report.desktopReference);
+await screenshot("cdp-desktop-references.png");
+
+await cdp.send("Emulation.setEmulatedMedia", { media: "print" });
+report.printReference = await evaluate(referenceLayoutExpression);
+assertReferenceLayout("Print", report.printReference);
+await screenshot("cdp-print-references.png");
+await cdp.send("Emulation.setEmulatedMedia", { media: "screen" });
 
 const anchorId = await evaluate(`(() => {
   const headings = [...document.querySelectorAll('.heading-pair[id]')];
