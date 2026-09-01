@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import re
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -22,10 +23,19 @@ RAW_TEX_IN_MATHML = re.compile(
     r"<(?:mtext|mi|mo)\b[^>]*>[^<]*\\[A-Za-z]+",
     re.IGNORECASE,
 )
+EQUATION_TAG_COMMAND = re.compile(r"(?<!\\)\\tag(?P<star>\*)?(?![A-Za-z])")
 
 
 class RenderError(RuntimeError):
     """The parsed document cannot be rendered safely."""
+
+
+@dataclass(frozen=True)
+class _EquationParts:
+    body: str
+    label: str | None = None
+    starred: bool = False
+    invalid_tag: bool = False
 
 
 def _markdown_renderer() -> MarkdownIt:
@@ -52,6 +62,62 @@ def _latex_group(value: str, start: int) -> tuple[str, int] | None:
                 return value[start + 1 : index], index
         index += 1
     return None
+
+
+def _strip_equation_delimiters(value: str) -> str:
+    stripped = value.strip()
+    for opening, closing in (("$$", "$$"), ("\\[", "\\]"), ("\\(", "\\)")):
+        if stripped.startswith(opening) and stripped.endswith(closing):
+            return stripped[len(opening) : -len(closing)].strip()
+    return stripped
+
+
+def _latex_depths(value: str) -> list[int]:
+    """Return brace depth before each character, ignoring escaped literal braces."""
+    depths: list[int] = []
+    depth = 0
+    index = 0
+    while index < len(value):
+        depths.append(depth)
+        character = value[index]
+        if character == "\\" and index + 1 < len(value) and value[index + 1] in "{}\\":
+            index += 1
+            depths.append(depth)
+        elif character == "{":
+            depth += 1
+        elif character == "}":
+            depth = max(0, depth - 1)
+        index += 1
+    return depths
+
+
+def _parse_equation(value: str) -> _EquationParts:
+    body = _strip_equation_delimiters(value)
+    commands = list(EQUATION_TAG_COMMAND.finditer(body))
+    if not commands:
+        return _EquationParts(body=body)
+
+    depths = _latex_depths(body)
+    if len(commands) != 1 or depths[commands[0].start()] != 0:
+        return _EquationParts(body=body, invalid_tag=True)
+
+    command = commands[0]
+    group_start = command.end()
+    while group_start < len(body) and body[group_start].isspace():
+        group_start += 1
+    group = _latex_group(body, group_start)
+    if group is None:
+        return _EquationParts(body=body, invalid_tag=True)
+
+    label, group_end = group
+    formula = body[: command.start()].rstrip()
+    if body[group_end + 1 :].strip() or not formula or not label.strip():
+        return _EquationParts(body=body, invalid_tag=True)
+    return _EquationParts(
+        body=formula,
+        label=label.strip(),
+        starred=command.group("star") is not None,
+    )
 
 
 def _legacy_em_payload(value: str) -> str | None:
@@ -171,12 +237,28 @@ def _link_endnote_markers(
 
 
 def render_equation(value: str) -> str:
-    stripped = value.strip()
-    for opening, closing in (("$$", "$$"), ("\\[", "\\]"), ("\\(", "\\)")):
-        if stripped.startswith(opening) and stripped.endswith(closing):
-            stripped = stripped[len(opening) : -len(closing)]
-            break
-    return _mathml(stripped, display=True)
+    equation = _parse_equation(value)
+    rendered_body = _mathml(equation.body, display=True)
+    if equation.label is None:
+        return rendered_body
+
+    rendered_label = _mathml(equation.label, display=False)
+    if not equation.starred:
+        rendered_label = f"({rendered_label})"
+    escaped_label = html.escape(equation.label, quote=True)
+    tag_kind = "tag-star" if equation.starred else "tag"
+    accessible_label = html.escape(
+        equation.label if equation.starred else f"({equation.label})",
+        quote=True,
+    )
+    return (
+        f'<div class="equation-layout" data-equation-label="{escaped_label}" '
+        f'data-equation-tag="{tag_kind}">'
+        f'<div class="equation-scroll">{rendered_body}</div>'
+        f'<span class="equation-number" aria-label="Equation {accessible_label}">'
+        f'<span aria-hidden="true">{rendered_label}</span>'
+        "</span></div>"
+    )
 
 
 def _copy_asset(asset: str, mineru_base: Path, media_dir: Path) -> str:

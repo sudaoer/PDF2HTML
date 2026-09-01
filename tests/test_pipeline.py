@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+from bs4 import BeautifulSoup
 
 from pdf2html.document import build_document, write_document, write_translation_tasks
 from pdf2html.layout import LayoutOverrideError, apply_layout_overrides, block_fingerprint
@@ -18,7 +19,7 @@ from pdf2html.models import (
     SourceReference,
     TranslationFile,
 )
-from pdf2html.render import build_paper, render_markdown
+from pdf2html.render import _parse_equation, build_paper, render_equation, render_markdown
 from pdf2html.translations import (
     TranslationError,
     load_translations,
@@ -65,7 +66,7 @@ def write_content_list(root: Path) -> Path:
             "table_caption": ["Table 1: Results."],
             "page_idx": 1,
         },
-        {"type": "equation", "text": "E = mc^2", "page_idx": 2},
+        {"type": "equation", "text": r"E = mc^2\tag{1}", "page_idx": 2},
         {
             "type": "list",
             "sub_type": "ref_text",
@@ -130,6 +131,7 @@ def test_document_tasks_render_and_verify(tmp_path: Path) -> None:
     )
     assert report["status"] == "passed"
     assert report["images"] == 1
+    assert report["equation_numbers"] == 1
     assert (tmp_path / "output" / "library" / "index.html").is_file()
     html = html_path.read_text(encoding="utf-8")
     assert "https://cdn" not in html
@@ -144,6 +146,76 @@ def test_document_tasks_render_and_verify(tmp_path: Path) -> None:
             translation_dir,
             html_path,
             tmp_path / "verification-with-fallback.json",
+        )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "error"),
+    [
+        ("missing", "expected one number"),
+        ("wrong", "wrong equation label"),
+        ("duplicate", "expected one number"),
+    ],
+)
+def test_verify_rejects_damaged_equation_numbers(
+    tmp_path: Path,
+    mutation: str,
+    error: str,
+) -> None:
+    document, content_path = prepared_document(tmp_path)
+    task_dir = tmp_path / "tasks"
+    translation_dir = tmp_path / "translations"
+    write_translation_tasks(document, task_dir)
+    fill_tasks(task_dir, translation_dir)
+    html_path = build_paper(
+        document,
+        load_translations(document, translation_dir),
+        content_list_path=content_path,
+        library_root=tmp_path / "output" / "library",
+    )
+    soup = BeautifulSoup(html_path.read_text(encoding="utf-8"), "html.parser")
+    number = soup.select_one(".equation-number")
+    layout = soup.select_one(".equation-layout")
+    assert number is not None
+    assert layout is not None
+    if mutation == "missing":
+        number.decompose()
+    elif mutation == "wrong":
+        layout["data-equation-label"] = "2"
+    else:
+        duplicate = BeautifulSoup(str(number), "html.parser").select_one(".equation-number")
+        assert duplicate is not None
+        number.insert_after(duplicate)
+    html_path.write_text(str(soup), encoding="utf-8")
+    with pytest.raises(VerificationError, match=error):
+        verify_output(
+            document,
+            translation_dir,
+            html_path,
+            tmp_path / f"verification-{mutation}.json",
+        )
+
+
+def test_verify_rejects_malformed_equation_tag(tmp_path: Path) -> None:
+    document, content_path = prepared_document(tmp_path)
+    equation = next(block for block in document.blocks if block.kind == "equation")
+    equation.source = r"E = mc^2\tag{1} trailing"
+    task_dir = tmp_path / "tasks"
+    translation_dir = tmp_path / "translations"
+    write_translation_tasks(document, task_dir)
+    fill_tasks(task_dir, translation_dir)
+    html_path = build_paper(
+        document,
+        load_translations(document, translation_dir),
+        content_list_path=content_path,
+        library_root=tmp_path / "output" / "library",
+    )
+    with pytest.raises(VerificationError, match="malformed or non-terminal"):
+        verify_output(
+            document,
+            translation_dir,
+            html_path,
+            tmp_path / "verification-malformed-tag.json",
         )
 
 
@@ -168,6 +240,72 @@ def test_math_is_rendered_as_offline_mathml() -> None:
     assert "MATHPLACEHOLDER" not in rendered
     assert "<script" not in rendered
     assert "cdn" not in rendered
+
+
+@pytest.mark.parametrize(
+    ("source", "label", "tag_kind", "visible_label"),
+    [
+        (r"$$x = 1\tag{1}$$", "1", "tag", "(1)"),
+        (r"x = 1\tag{10}", "10", "tag", "(10)"),
+        (r"x = 1\tag{2a}", "2a", "tag", "(2a)"),
+        (r"x = 1\tag{S1}", "S1", "tag", "(S1)"),
+        (r"x = 1\tag*{S1}", "S1", "tag-star", "S1"),
+        (r"\begin{array}{c}x=1\\y=2\end{array}\tag{3}", "3", "tag", "(3)"),
+        (r"x = 1\tag{A_{1}}", "A_{1}", "tag", "(A1)"),
+    ],
+)
+def test_display_equation_number_is_rendered_outside_mathml(
+    source: str,
+    label: str,
+    tag_kind: str,
+    visible_label: str,
+) -> None:
+    soup = BeautifulSoup(render_equation(source), "html.parser")
+    layout = soup.select_one(".equation-layout")
+    assert layout is not None
+    assert layout.get("data-equation-label") == label
+    assert layout.get("data-equation-tag") == tag_kind
+    number = layout.select_one(".equation-number")
+    formula = layout.select_one(".equation-scroll math")
+    assert number is not None
+    assert formula is not None
+    assert number.find_parent("math") is None
+    assert number.get_text("", strip=True) == visible_label
+    assert r"\tag" not in str(formula)
+    assert not layout.select(".math-fallback")
+
+
+def test_unnumbered_equation_keeps_the_existing_mathml_shape() -> None:
+    rendered = render_equation(r"\[x = 1\]")
+    soup = BeautifulSoup(rendered, "html.parser")
+    assert soup.select_one(".math-display math") is not None
+    assert soup.select_one(".equation-layout") is None
+    assert soup.select_one(".equation-number") is None
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        r"x = 1\tag",
+        r"x = 1\tag{",
+        r"x = 1\tag{1} trailing",
+        r"x = \text{\tag{1}}",
+        r"x = 1\tag{1}\tag{2}",
+        r"\tag{1}",
+        r"x = 1\tag{}",
+    ],
+)
+def test_malformed_or_non_terminal_equation_tags_are_not_detached(source: str) -> None:
+    parsed = _parse_equation(source)
+    assert parsed.invalid_tag
+    assert parsed.label is None
+    assert render_equation(source).find('class="equation-number"') == -1
+
+
+def test_latex_tag_text_inside_an_operator_name_is_not_an_equation_number() -> None:
+    parsed = _parse_equation(r"x = \operatorname{tag}(y)")
+    assert not parsed.invalid_tag
+    assert parsed.label is None
 
 
 def test_legacy_math_font_commands_are_normalized_and_unparsed_tex_falls_back() -> None:

@@ -7,6 +7,7 @@ from typing import Any
 from bs4 import BeautifulSoup
 
 from .models import Document
+from .render import EQUATION_TAG_COMMAND, _parse_equation
 from .translations import load_translations
 from .util import atomic_write_json
 
@@ -160,6 +161,49 @@ def verify_output(
             "MathML contains unparsed TeX control sequences: "
             f"{raw_mathml_commands[:3]}"
         )
+    expected_equation_numbers = 0
+    for block in document.blocks:
+        if block.kind != "equation":
+            continue
+        equation = _parse_equation(block.source)
+        section = soup.find(id=block.id)
+        rendered_numbers = section.select(".equation-number") if section else []
+        if equation.invalid_tag:
+            errors.append(f"Equation {block.id} has a malformed or non-terminal \\tag command.")
+            continue
+        if equation.label is None:
+            if rendered_numbers:
+                errors.append(f"Unnumbered equation {block.id} rendered an equation number.")
+            continue
+        expected_equation_numbers += 1
+        if len(rendered_numbers) != 1:
+            errors.append(
+                f"Equation {block.id} expected one number, rendered {len(rendered_numbers)}."
+            )
+            continue
+        number = rendered_numbers[0]
+        layout = number.find_parent(class_="equation-layout")
+        expected_kind = "tag-star" if equation.starred else "tag"
+        if layout is None:
+            errors.append(f"Equation {block.id} number is outside its equation layout.")
+            continue
+        if str(layout.get("data-equation-label") or "") != equation.label:
+            errors.append(f"Equation {block.id} rendered the wrong equation label.")
+        if str(layout.get("data-equation-tag") or "") != expected_kind:
+            errors.append(f"Equation {block.id} rendered the wrong equation tag style.")
+        if number.find_parent("math") is not None:
+            errors.append(f"Equation {block.id} number remains inside MathML.")
+        formula = layout.select_one(".equation-scroll math")
+        if formula is None:
+            errors.append(f"Equation {block.id} has no numbered formula MathML.")
+        elif EQUATION_TAG_COMMAND.search(formula.get_text(" ", strip=True)):
+            errors.append(f"Equation {block.id} still contains a \\tag command in MathML.")
+    rendered_equation_numbers = len(soup.select(".paper-body .equation-number"))
+    if rendered_equation_numbers != expected_equation_numbers:
+        errors.append(
+            f"Expected {expected_equation_numbers} equation numbers, "
+            f"rendered {rendered_equation_numbers}."
+        )
     expected_groups = sum(block.kind == "figure_group" for block in document.blocks)
     rendered_groups = soup.select("figure.figure-group")
     if len(rendered_groups) != expected_groups:
@@ -189,6 +233,7 @@ def verify_output(
         "bilingual_pairs": pair_count,
         "images": len(material_images),
         "math_fallbacks": fallback_math,
+        "equation_numbers": rendered_equation_numbers,
         "figure_groups": expected_groups,
         "front_matter_notes": len(document.front_matter_notes),
         "endnotes": len(document.endnotes),
