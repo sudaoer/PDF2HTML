@@ -12,6 +12,7 @@ import uvicorn
 from pydantic import ValidationError
 
 from .bundle import BundleError, build_bundle
+from .config import ConfigurationError, resolve_library_root
 from .document import build_document, write_document
 from .layout import LayoutOverrideError, load_layout_overrides
 from .mineru_runner import (
@@ -243,6 +244,34 @@ def _load_finalized_document(manifest: JobManifest) -> Document:
             f"The finalized document belongs to {document.job_id}, not {manifest.job_id}."
         )
     return document
+
+
+def _manifest_bundle_path(manifest: JobManifest) -> tuple[Path, str]:
+    if not manifest.bundle_path.strip():
+        raise ValueError(
+            "The job manifest has no bundle_path; run build again before verify."
+        )
+    bundle_path = Path(manifest.bundle_path)
+    if not bundle_path.is_absolute():
+        bundle_path = _root() / bundle_path
+    bundle_path = bundle_path.resolve()
+    library_root = resolve_library_root(_root()).resolve()
+    papers_root = library_root / "papers"
+    try:
+        relative = bundle_path.relative_to(papers_root)
+    except ValueError as exc:
+        raise ValueError(
+            f"The manifest bundle_path resolves outside the configured library "
+            f"{library_root}: {bundle_path}. Rebuild the job or migrate its bundle "
+            "to the configured knowledge repository."
+        ) from exc
+    if len(relative.parts) != 2 or relative.parts[1] != "paper.json":
+        raise ValueError(
+            f"The manifest bundle_path must resolve to "
+            f"{papers_root / '<paper-id>' / 'paper.json'}: {bundle_path}. "
+            "Rebuild the job or migrate its bundle to the configured knowledge repository."
+        )
+    return bundle_path, relative.parts[0]
 
 
 def _selected_items(
@@ -547,7 +576,7 @@ def build_command(
             document,
             translations,
             content_list_path=content_list_path,
-            library_root=_root() / "output" / "library",
+            library_root=resolve_library_root(_root()),
         )
         manifest.bundle_path = relative_to(bundle.bundle_path, _root())
         manifest.bundle_revision = bundle.revision
@@ -569,10 +598,11 @@ def verify(
         manifest = _load_manifest(job)
         if manifest.status not in {"built", "verified"}:
             raise ValueError("Build the finalized paper before verification.")
-        bundle_report = verify_bundle(_root() / manifest.bundle_path)
+        bundle_path, paper_id = _manifest_bundle_path(manifest)
+        bundle_report = verify_bundle(bundle_path)
         http_report = verify_http_app(
-            library_root=_root() / "output" / "library",
-            paper_id=(_root() / manifest.bundle_path).parent.name,
+            library_root=resolve_library_root(_root()),
+            paper_id=paper_id,
         )
         report = {
             "job_id": manifest.job_id,
@@ -606,8 +636,8 @@ def serve(
 ) -> None:
     """Serve the read-only Vue library on 127.0.0.1."""
     try:
-        application = create_app(library_root=_root() / "output" / "library")
-    except (OSError, ServerError, ValueError) as exc:
+        application = create_app(library_root=resolve_library_root(_root()))
+    except (ConfigurationError, OSError, ServerError, ValueError) as exc:
         typer.echo(f"ERROR: {exc}", err=True)
         raise typer.Exit(1) from exc
     uvicorn.run(application, host="127.0.0.1", port=port)

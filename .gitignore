@@ -5,6 +5,7 @@
 # Generated papers, caches, and local diagnostics
 .work/
 output/
+pdf2html.local.toml
 tmp/
 .pytest_cache/
 .ruff_cache/

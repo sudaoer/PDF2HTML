@@ -14,6 +14,35 @@ pixi run pdf2html preflight
 Python 与 MinerU 依赖由 Pixi 管理；Vue 前端只使用 pnpm。仓库已提交可直接运行的
 Vue distribution，`pnpm build` 用于前端开发后刷新这些资源。
 
+## 学习仓库位置
+
+PDF2HTML 保存工具代码和 `.work/` 中的解析、布局及翻译工作状态；论文 bundle、笔记和
+知识条目保存在外部独立 Git 学习仓库。两个仓库分别提交，不使用子模块或目录联接。
+
+在工具仓库根目录创建不受 Git 跟踪的 `pdf2html.local.toml`：
+
+```toml
+knowledge_root = '../../Research/knowledge'
+```
+
+相对路径以工具仓库当前工作目录为基准，也可使用绝对路径，例如
+`knowledge_root = 'C:/Users/hhj/Documents/Research/knowledge'`。配置优先级为
+`PDF2HTML_KNOWLEDGE_ROOT` 环境变量、`pdf2html.local.toml`、旧的 `output/` 默认目录。
+配置错误会报错；配置文件缺失且未设置环境变量时才使用旧默认值。新机器上应先恢复路径
+配置，再执行构建或启动阅读器。
+
+`build`、`verify` 和 `serve` 使用同一个 `<knowledge-root>/library`。学习仓库内部保留
+`library/papers/`、`notes/`、`knowledge/`、`projects/`、`inbox/` 和 `templates/`，因此
+论文与知识条目的相对链接不依赖 PDF2HTML 工具目录的位置。阅读器只暴露论文库，人工
+笔记仍通过 Markdown 编辑器阅读。
+
+迁移已有学习仓库时，应整体保留 `.git` 和内部目录，先记录文件哈希，再核对迁移后的
+内容。已有 `.work/jobs/*/manifest.json` 中的 `bundle_path` 也须在核验映射后更新到新
+位置，并重新运行 `verify`；仅改变配置不会自动迁移文件或重写任务记录。不要手工修改
+生成的论文 bundle。`.work/` 中的审阅布局、翻译和来源副本仍需保留，以便复用和重建。
+
+## Zotero 连接
+
 预检（preflight）必须报告 Zotero API 版本 3、MinerU、Poppler、启用 CUDA 的 PyTorch 以及预期的 GPU。Zotero 必须处于运行状态，并启用 **设置（Settings）> 高级（Advanced）> 允许此计算机上的其他应用程序与 Zotero 通信（Allow other applications on this computer to communicate with Zotero）**。
 
 ## 论文工作流
@@ -83,9 +112,9 @@ pixi run pdf2html verify --job <job-id>
 pixi run pdf2html status --job <job-id>
 ```
 
-`build` 只在 `output/library/papers/<paper-id>/` 写入可重复生成的 Markdown
+`build` 只在 `<knowledge-root>/library/papers/<paper-id>/` 写入可重复生成的 Markdown
 bundle：`paper.en.md`、`paper.zh-CN.md`、自包含的 `paper.json` 和内容寻址的
-`media/`。它不会在 `output/library` 生成 HTML。
+`media/`。它不会在论文库目录生成 HTML。
 
 启动只读本地书架：
 
