@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import platform
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +14,10 @@ from .models import PaperMetadata
 
 class ZoteroError(RuntimeError):
     """A clear, actionable Zotero integration error."""
+
+
+def _is_wsl() -> bool:
+    return "microsoft" in platform.release().lower()
 
 
 @dataclass(frozen=True)
@@ -224,8 +229,13 @@ class ZoteroClient:
         url_response.raise_for_status()
         pdf_path = self._file_url_to_path(url_response.text.strip())
         if not pdf_path.is_file():
+            hint = (
+                " Check that the Windows drive is mounted under /mnt."
+                if _is_wsl() and pdf_path.is_relative_to("/mnt")
+                else ""
+            )
             raise ZoteroError(
-                f"PDF attachment {attachment_key} points to a missing local file: {pdf_path}"
+                f"PDF attachment {attachment_key} points to a missing local file: {pdf_path}.{hint}"
             )
         return SelectedPaper(
             library=library,
@@ -249,6 +259,8 @@ class ZoteroClient:
             raise ZoteroError(f"Zotero returned an unexpected attachment URL: {value}")
         decoded = unquote(parsed.path)
         if re.match(r"^/[A-Za-z]:/", decoded):
+            if _is_wsl():
+                return Path("/mnt") / decoded[1].lower() / decoded[4:]
             decoded = decoded[1:]
         return Path(decoded)
 

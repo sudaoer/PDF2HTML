@@ -14,6 +14,17 @@ pixi run pdf2html preflight
 Python 与 MinerU 依赖由 Pixi 管理；Vue 前端只使用 pnpm。仓库已提交可直接运行的
 Vue distribution，`pnpm build` 用于前端开发后刷新这些资源。
 
+### 在 WSL 中运行
+
+Windows 运行 Zotero，WSL 运行本仓库的 Pixi、MinerU 和阅读服务。此方式要求 WSL
+使用镜像网络模式，并将 Windows 本地盘符按默认规则挂载到 `/mnt/<小写盘符>`。
+在 WSL 终端执行上面的安装和预检命令；Zotero 需在 Windows 中运行并启用本地 API。
+镜像网络下仍使用 `http://localhost:23119/api`，无需配置 Windows 主机 IP。
+Zotero 返回的 `file:///C:/...` 附件地址会映射为 `/mnt/c/...`；附件所在盘必须已挂载，
+且 WSL 用户能够读取该 PDF。MinerU 使用 WSL 中的 NVIDIA GPU，预检会检查 CUDA。
+从 Windows 浏览器访问 WSL 中启动的阅读服务时，使用
+`http://127.0.0.1:8765/`。
+
 ## 学习仓库位置
 
 PDF2HTML 保存工具代码和 `.work/` 中的解析、布局及翻译工作状态；论文 bundle、笔记和
@@ -30,6 +41,10 @@ knowledge_root = '../../Research/knowledge'
 `PDF2HTML_KNOWLEDGE_ROOT` 环境变量、`pdf2html.local.toml`、旧的 `output/` 默认目录。
 配置错误会报错；配置文件缺失且未设置环境变量时才使用旧默认值。新机器上应先恢复路径
 配置，再执行构建或启动阅读器。
+
+在 WSL 中，`knowledge_root` 必须写成 WSL 可访问的 Linux 路径，例如
+`'/home/<user>/Research/knowledge'`；若学习仓库保存在 Windows 的 `C:` 盘，
+则使用 `'/mnt/c/Users/<user>/Documents/Research/knowledge'`。
 
 `build`、`verify` 和 `serve` 使用同一个 `<knowledge-root>/library`。学习仓库内部保留
 `library/papers/`、`notes/`、`knowledge/`、`projects/`、`inbox/` 和 `templates/`，因此

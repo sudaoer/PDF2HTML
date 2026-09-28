@@ -518,9 +518,10 @@ def test_legacy_math_font_commands_are_normalized_and_unparsed_tex_falls_back() 
     assert "math-fallback" in fallback
 
 
-def test_helpers() -> None:
+def test_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
     assert slugify("RouterNet: AP X-ray") == "routernet-ap-x-ray"
     assert hash_text("stable") == hash_text("stable")
+    monkeypatch.setattr("pdf2html.zotero._is_wsl", lambda: False)
     assert ZoteroClient._file_url_to_path("file:///C:/Zotero/a%20paper.pdf") == Path(
         "C:/Zotero/a paper.pdf"
     )

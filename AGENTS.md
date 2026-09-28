@@ -8,7 +8,9 @@
 - 根仓库是 PDF2HTML 工具仓库，保存源代码、测试、前端资源和工作流文档。
 - 学习仓库位于工具仓库之外，是独立的 Git 仓库，保存已验证的论文 bundle、人工笔记
   和知识条目。通过 `pdf2html.local.toml` 的 `knowledge_root` 配置位置；环境变量
-  `PDF2HTML_KNOWLEDGE_ROOT` 优先。本机位置为 `C:/Users/hhj/Documents/Research/knowledge`。
+  `PDF2HTML_KNOWLEDGE_ROOT` 优先。Windows 配置使用 Windows 路径；WSL 配置须使用
+  WSL 可访问的 Linux 路径。本机 Windows 位置为
+  `C:/Users/hhj/Documents/Research/knowledge`。
 - 下文 `<knowledge-root>` 指配置解析后的学习仓库根目录。`output/` 仅作为未配置时的
   旧路径兼容，继续保持忽略；不要建立子模块、目录联接或复制一份日常使用的知识库。
 - 说明文档、人工笔记、知识条目和提交信息使用简体中文。
