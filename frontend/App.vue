@@ -55,16 +55,20 @@ const visibleBlocks = computed(() => {
       String(block.extra.front_matter_role ?? ""),
     ),
   );
-  if (!document.metadata.abstract) return bodyBlocks;
   const introduction = bodyBlocks.findIndex(
     (block) =>
       block.kind === "heading" &&
-      block.source.replace(/^\d+(?:\.\d+)*\.?\s*/, "").trim().toLowerCase() === "introduction",
+      block.source.replace(/^(?:\d+(?:\.\d+)*\.?|[IVXLCDM]+\.)\s*/, "").trim().toLowerCase() === "introduction",
   );
   if (introduction < 0) return bodyBlocks;
+  const abstract = bodyBlocks.findIndex(
+    (block, index) =>
+      index < introduction && block.kind === "paragraph" && /^Abstract\b/i.test(block.source),
+  );
+  if (!document.metadata.abstract && abstract < 0) return bodyBlocks;
   return [
-    ...bodyBlocks.slice(0, introduction).filter(
-      (block) =>
+    ...bodyBlocks.slice(0, introduction).filter((block, index) =>
+        (!document.metadata.abstract && index >= abstract) ||
         String(block.extra.front_matter_role ?? "") === "keywords" ||
         (block.kind === "paragraph" && block.source.toLowerCase().includes("http")),
     ),
@@ -247,7 +251,7 @@ onBeforeUnmount(() => {
             <p class="eyebrow">Bilingual paper · 双语论文</p>
             <h1 lang="zh-CN">{{ translations['meta.title'] }}</h1>
             <p class="original-title" lang="en">{{ bundle.document.metadata.title }}</p>
-            <p class="byline">{{ bundle.document.metadata.creators.join(", ") }}</p>
+            <p class="byline">{{ [...new Set(bundle.document.metadata.creators)].join(", ") }}</p>
             <dl class="paper-meta">
               <div v-if="bundle.document.metadata.publication"><dt>来源</dt><dd>{{ bundle.document.metadata.publication }}</dd></div>
               <div v-if="bundle.document.metadata.date"><dt>日期</dt><dd>{{ bundle.document.metadata.date }}</dd></div>

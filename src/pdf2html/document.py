@@ -124,6 +124,11 @@ def _normalize_v2_entry(raw: dict[str, Any], page_index: int) -> dict[str, Any]:
             table_footnote=_rich_text(content.get("table_footnote")),
             img_path=_image_path(content),
         )
+    elif kind == "code":
+        normalized.update(
+            code_body=_rich_text(content.get("code_content")),
+            code_caption=_rich_text(content.get("code_caption")),
+        )
     elif kind == "list":
         items: list[str] = []
         raw_items = content.get("list_items")

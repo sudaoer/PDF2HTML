@@ -323,25 +323,39 @@ def _build_paper_page(
     toc: list[dict[str, Any]] = []
     endnote_links = {(note.page, note.marker): note.id for note in document.endnotes if note.marker}
     stream_blocks = [block for block in document.blocks if not is_front_matter_duplicate(block)]
-    if document.metadata.abstract:
-        introduction_index = next(
+    introduction_index = next(
+        (
+            index
+            for index, block in enumerate(stream_blocks)
+            if block.kind == "heading"
+            and re.sub(
+                r"^(?:\d+(?:\.\d+)*|[IVXLCDM]+\.)\s*", "", block.source
+            ).strip().casefold()
+            == "introduction"
+        ),
+        None,
+    )
+    if introduction_index is not None:
+        abstract_index = next(
             (
                 index
-                for index, block in enumerate(stream_blocks)
-                if block.kind == "heading"
-                and re.sub(r"^\d+(?:\.\d+)*\s*", "", block.source).strip().casefold()
-                == "introduction"
+                for index, block in enumerate(stream_blocks[:introduction_index])
+                if block.kind == "paragraph" and re.match(r"^Abstract\b", block.source, re.I)
             ),
             None,
         )
-        if introduction_index is not None:
-            # Zotero metadata already supplies the title, authors, and abstract
-            # used by the reader masthead. Keep useful pre-introduction links,
-            # then begin the reflowed body at the Introduction heading.
+        if document.metadata.abstract or abstract_index is not None:
             useful_front_matter = [
                 block
-                for block in stream_blocks[:introduction_index]
-                if block.kind == "paragraph" and "http" in block.source.casefold()
+                for index, block in enumerate(stream_blocks[:introduction_index])
+                if (
+                    (
+                        not document.metadata.abstract
+                        and abstract_index is not None
+                        and index >= abstract_index
+                    )
+                    or (block.kind == "paragraph" and "http" in block.source.casefold())
+                )
             ]
             stream_blocks = useful_front_matter + stream_blocks[introduction_index:]
     for block in stream_blocks:

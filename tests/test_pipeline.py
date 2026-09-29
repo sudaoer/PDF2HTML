@@ -585,6 +585,29 @@ def test_mineru_v2_pages_are_flattened(tmp_path: Path) -> None:
     assert document.blocks[2].source == "- [1] Reference"
 
 
+def test_mineru_v2_code_preserves_body_and_caption(tmp_path: Path) -> None:
+    payload = [[{
+        "type": "code",
+        "content": {
+            "code_content": [{"type": "text", "content": "int value = 1;"}],
+            "code_caption": [{"type": "text", "content": "Fig. 4: Allocation strategy."}],
+        },
+    }]]
+    path = tmp_path / "paper_content_list_v2.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    document = build_document(
+        job_id="v2-code-job",
+        metadata=PaperMetadata(title="Code figure"),
+        source=source_reference(),
+        content_list_path=path,
+    )
+    assert document.blocks[0].kind == "code"
+    assert document.blocks[0].source == "int value = 1;"
+    assert document.blocks[0].caption_source == "Fig. 4: Allocation strategy."
+    assert any(segment.id == "b0001.caption" for segment in document.segments)
+
+
 def test_list_item_markers_are_canonicalized_without_changing_content(
     tmp_path: Path,
 ) -> None:

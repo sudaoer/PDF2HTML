@@ -111,6 +111,8 @@ def run_mineru(
             "MINERU_LMDEPLOY_BACKEND": "turbomind",
         }
     )
+    if sys.platform == "linux" and backend in {"hybrid-engine", "vlm-engine"}:
+        environment["VLLM_USE_FLASHINFER_SAMPLER"] = "0"
     if cuda_root is not None:
         # lmdeploy's Windows wheel only checks CUDA_PATH/bin. The locked PyTorch
         # wheel already carries the matching CUDA 12.8 runtime DLLs, exposed

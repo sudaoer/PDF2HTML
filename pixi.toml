@@ -31,12 +31,12 @@ fastapi = ">=0.116,<1"
 mineru = { version = ">=3.3,<4", extras = ["all"] }
 latex2mathml = ">=3.79,<4"
 
-torch = {
-    index = "https://download.pytorch.org/whl/cu128"
-}
-
-torchvision = {
-    index = "https://download.pytorch.org/whl/cu128"
-}
-
 uvicorn = ">=0.35,<1"
+
+[target.linux-64.pypi-dependencies]
+torch = { index = "https://download.pytorch.org/whl/cu130" }
+torchvision = { index = "https://download.pytorch.org/whl/cu130" }
+
+[target.win-64.pypi-dependencies]
+torch = { index = "https://download.pytorch.org/whl/cu128" }
+torchvision = { index = "https://download.pytorch.org/whl/cu128" }
