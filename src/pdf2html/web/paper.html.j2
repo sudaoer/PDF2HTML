@@ -135,6 +135,12 @@
           {% elif block.kind in ['equation', 'code', 'reference'] %}
           <section class="source-only {{ block.kind }}" id="{{ block.id }}" data-page="{{ block.page }}" lang="en">
             {{ block.source_html | safe }}
+            {% if block.kind == 'code' and block.caption_source_html %}
+            <div class="code-caption pair">
+              <div class="target" lang="zh-CN">{{ block.caption_target_html | safe }}</div>
+              <div class="source" lang="en">{{ block.caption_source_html | safe }}</div>
+            </div>
+            {% endif %}
             <span class="page-marker">{{ block.page_label }}</span>
           </section>
           {% else %}

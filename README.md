@@ -8,6 +8,7 @@ PDF2HTML 是一个由 Codex 运行的本地工作流，用于把 Zotero 中的�
 pixi install
 pnpm install --frozen-lockfile
 pnpm build
+pixi run install-browser
 pixi run pdf2html preflight
 ```
 
@@ -111,6 +112,27 @@ pixi run pdf2html layout --job <job-id>
 
 `move` 使用两个 target（移动块、锚点）以及 `before_id` 或 `after_id`；`reclassify` 使用一个 target 和受支持的 `kind`，改为 `heading` 时还必须提供 1–6 的 `level`；`drop` 使用一个 target 和必填原因。override 不能修改文本、图片路径、译文或 HTML，任何前置条件失配都会使整份文件失效。标题层级属于块指纹的一部分，因此刷新归一化规则后必须从最新报告复制 target。
 
+源 PDF 证实 MinerU 文本识别有误时，在作业目录创建 `text_corrections.json`，逐项校正块的 `source` 或 `caption_source`。它与结构性 override 分开管理；每项使用最新 `layout_report.json` 中的 `override_targets` 作为目标，且必须填写核对原因：
+
+```json
+{
+  "schema_version": 1,
+  "job_id": "<job-id>",
+  "source_sha256": "<manifest source.sha256>",
+  "content_sha256": "<layout_report normalization.content_sha256>",
+  "corrections": [
+    {
+      "target": {"id": "<block-id>", "page": 0, "bbox": [0, 0, 0, 0], "block_hash": "<hash>"},
+      "field": "source",
+      "value": "<checked text>",
+      "reason": "Checked against source PDF page 1"
+    }
+  ]
+}
+```
+
+修改后重新运行 `layout`、视觉审查和 `finalize-layout`。源文字变更会使对应译文失效，须补全新的翻译任务，再运行 `build` 与 `verify`；不得直接编辑 MinerU 输出或生成的论文 bundle。
+
 预览通过后锁定结构并生成翻译任务：
 
 ```powershell
@@ -136,6 +158,16 @@ bundle：`paper.en.md`、`paper.zh-CN.md`、自包含的 `paper.json` 和内容�
 ```powershell
 pixi run pdf2html serve --port 8765
 ```
+
+在当前环境生成视觉检查用 PNG（PDF 页码从 1 开始）：
+
+```bash
+pixi run pdf2html render-pdf --pdf .work/jobs/<job-id>/source.pdf --page 6 --dpi 150 --output /tmp/source-p6.png
+pixi run pdf2html render-web --url file:///absolute/path/to/layout_preview/index.html --output /tmp/layout.png --width 1440 --selector '#<block-id>'
+pixi run pdf2html render-web --url http://127.0.0.1:8765/papers/<paper-id>/ --output /tmp/reader.png --width 1024 --wait-for .paper-body --selector '#<block-id>'
+```
+
+`render-web` 使用当前系统的 Playwright 无头 Chromium。首次使用时运行 `pixi run install-browser` 下载对应系统的浏览器；WSL 内会使用 Linux 浏览器。`--selector` 只截取指定页面元素；省略它时截取视口，加入 `--full-page` 时截取整页。`--height` 设置视口高度。
 
 服务固定监听 `127.0.0.1`。打开 `http://127.0.0.1:8765/` 即可使用 Vue
 书架、双语阅读器和中英文全文搜索。Markdown、sidecar 和媒体也可通过每篇论文的

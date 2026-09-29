@@ -31,7 +31,9 @@ from .models import (
     migrate_job_manifest,
 )
 from .render import build_layout_preview
+from .screenshot import ScreenshotError, render_pdf_page, render_webpage
 from .server import ServerError, create_app, verify_http_app
+from .text_corrections import TextCorrectionError, load_text_corrections
 from .translations import (
     TranslationError,
     load_translations,
@@ -55,7 +57,7 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
-LAYOUT_PIPELINE_VERSION = "7"
+LAYOUT_PIPELINE_VERSION = "8"
 
 
 def _root() -> Path:
@@ -85,7 +87,7 @@ def _save_manifest(manifest: JobManifest) -> None:
 
 def _layout_inputs(
     manifest: JobManifest,
-) -> tuple[Path, str, Path | None, str, Path, str, str]:
+) -> tuple[Path, str, Path | None, str, Path, str, Path, str, str]:
     source_copy = _job_dir(manifest.job_id) / "source.pdf"
     if not source_copy.is_file() or hash_file(source_copy) != manifest.source.sha256:
         raise ValueError("The job source PDF is missing or its SHA-256 changed.")
@@ -106,6 +108,8 @@ def _layout_inputs(
         middle_hash = ""
     override_path = _job_dir(manifest.job_id) / "layout_overrides.json"
     override_hash = hash_file(override_path) if override_path.is_file() else ""
+    correction_path = _job_dir(manifest.job_id) / "text_corrections.json"
+    correction_hash = hash_file(correction_path) if correction_path.is_file() else ""
     input_hash = hash_text(
         ":".join(
             (
@@ -114,6 +118,7 @@ def _layout_inputs(
                 content_hash,
                 middle_hash,
                 override_hash,
+                correction_hash,
             )
         )
     )
@@ -124,6 +129,8 @@ def _layout_inputs(
         middle_hash,
         override_path,
         override_hash,
+        correction_path,
+        correction_hash,
         input_hash,
     )
 
@@ -136,6 +143,8 @@ def _write_layout(manifest: JobManifest) -> dict[str, Any]:
         middle_hash,
         override_path,
         override_hash,
+        correction_path,
+        correction_hash,
         input_hash,
     ) = _layout_inputs(manifest)
     override_errors: list[str] = []
@@ -143,6 +152,12 @@ def _write_layout(manifest: JobManifest) -> dict[str, Any]:
     try:
         overrides = load_layout_overrides(
             override_path,
+            job_id=manifest.job_id,
+            source_sha256=manifest.source.sha256,
+            content_sha256=content_hash,
+        )
+        corrections = load_text_corrections(
+            correction_path,
             job_id=manifest.job_id,
             source_sha256=manifest.source.sha256,
             content_sha256=content_hash,
@@ -155,8 +170,9 @@ def _write_layout(manifest: JobManifest) -> dict[str, Any]:
             middle_json_path=middle_path,
             content_sha256=content_hash,
             overrides=overrides,
+            text_corrections=corrections,
         )
-    except LayoutOverrideError as exc:
+    except (LayoutOverrideError, TextCorrectionError) as exc:
         override_errors.append(str(exc))
         document = build_document(
             job_id=manifest.job_id,
@@ -171,6 +187,7 @@ def _write_layout(manifest: JobManifest) -> dict[str, Any]:
             "pipeline_version": LAYOUT_PIPELINE_VERSION,
             "layout_input_hash": input_hash,
             "overrides_sha256": override_hash,
+            "text_corrections_sha256": correction_hash,
             "middle_sha256": middle_hash,
         }
     )
@@ -206,7 +223,7 @@ def _write_layout(manifest: JobManifest) -> dict[str, Any]:
 
 
 def _assert_current_layout(manifest: JobManifest) -> tuple[Document, dict[str, Any]]:
-    _, _, _, _, _, _, input_hash = _layout_inputs(manifest)
+    _, _, _, _, _, _, _, _, input_hash = _layout_inputs(manifest)
     if input_hash != manifest.layout_input_hash:
         raise ValueError(
             "Layout inputs changed; run the layout command and review the preview again."
@@ -357,6 +374,46 @@ def preflight() -> None:
             typer.echo(f"ERROR: {failure}", err=True)
         raise typer.Exit(1)
     typer.echo("Preflight passed.")
+
+
+@app.command(name="render-pdf")
+def render_pdf_command(
+    pdf: Annotated[Path, typer.Option("--pdf", help="Source PDF path")],
+    page: Annotated[int, typer.Option("--page", help="One-based PDF page number")],
+    output: Annotated[Path, typer.Option("--output", help="PNG output path")],
+    dpi: Annotated[int, typer.Option("--dpi")] = 150,
+) -> None:
+    """Render one source PDF page to a PNG for visual review."""
+    try:
+        typer.echo(str(render_pdf_page(pdf, output, page=page, dpi=dpi)))
+    except ScreenshotError as exc:
+        typer.echo(f"ERROR: {exc}", err=True)
+        raise typer.Exit(1) from exc
+
+
+@app.command(name="render-web")
+def render_web_command(
+    url: Annotated[str, typer.Option("--url", help="Local preview file or reader URL")],
+    output: Annotated[Path, typer.Option("--output", help="PNG output path")],
+    width: Annotated[int, typer.Option("--width")] = 1440,
+    height: Annotated[int, typer.Option("--height")] = 900,
+    full_page: Annotated[bool, typer.Option("--full-page")] = False,
+    selector: Annotated[str | None, typer.Option("--selector")] = None,
+    wait_for: Annotated[str | None, typer.Option("--wait-for")] = None,
+) -> None:
+    """Capture a webpage with Chromium running in the active environment."""
+    try:
+        typer.echo(
+            str(
+                render_webpage(
+                    url, output, width=width, height=height,
+                    full_page=full_page, selector=selector, wait_for=wait_for,
+                )
+            )
+        )
+    except ScreenshotError as exc:
+        typer.echo(f"ERROR: {exc}", err=True)
+        raise typer.Exit(1) from exc
 
 
 def _prepare_one(

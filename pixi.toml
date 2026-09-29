@@ -11,6 +11,7 @@ serve = { cmd = "python -m pdf2html serve", env = { PYTHONPATH = "src" } }
 test = { cmd = "python -m pytest", env = { PYTHONPATH = "src" } }
 lint = "python -m ruff check ."
 typecheck = "python -m pyright"
+install-browser = { cmd = "python -m playwright install chromium --only-shell", env = { PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT = "120000" } }
 
 [dependencies]
 setuptools = ">=77.0.3,<80"
@@ -22,6 +23,7 @@ httpx = ">=0.28,<0.29"
 jinja2 = ">=3.1,<4"
 markdown-it-py = ">=4,<5"
 poppler = ">=25,<26"
+pillow = ">=11,<13"
 pydantic = ">=2.12,<3"
 pypdf = ">=6.6,<7"
 typer = ">=0.20,<1"
@@ -30,6 +32,7 @@ typer = ">=0.20,<1"
 fastapi = ">=0.116,<1"
 mineru = { version = ">=3.3,<4", extras = ["all"] }
 latex2mathml = ">=3.79,<4"
+playwright = ">=1.55,<2"
 
 uvicorn = ">=0.35,<1"
 

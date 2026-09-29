@@ -110,3 +110,28 @@ describe("table blocks", () => {
     expect(wrapper.find(".table-caption .source").text()).toBe("Table 1: Results");
   });
 });
+
+it("renders the reviewed caption below a code block", () => {
+  const block: DocumentBlock = {
+    ...heading(0),
+    id: "code-1",
+    kind: "code",
+    level: 0,
+    source: "alloc = vmalloc(size);",
+    segment_id: "",
+    caption_source: "Fig. 4: Allocation strategy.",
+    caption_segment_id: "code-1.caption",
+  };
+  const wrapper = mount(PaperBlock, {
+    props: {
+      block,
+      mode: "bilingual",
+      paperId: "paper",
+      translations: { "code-1.caption": "图 4：分配策略。" },
+      media: {},
+    },
+  });
+  expect(wrapper.find("pre code").text()).toBe("alloc = vmalloc(size);");
+  expect(wrapper.find(".code-caption .target").text()).toBe("图 4：分配策略。");
+  expect(wrapper.find(".code-caption .source").text()).toBe("Fig. 4: Allocation strategy.");
+});

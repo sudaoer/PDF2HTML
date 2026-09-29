@@ -15,9 +15,11 @@ from .models import (
     PaperMetadata,
     Segment,
     SourceReference,
+    TextCorrections,
     TranslationEntry,
     TranslationFile,
 )
+from .text_corrections import apply_text_corrections
 from .util import atomic_write_json, hash_text, read_json
 
 PROTECTED_PATTERNS = [
@@ -675,6 +677,7 @@ def build_document(
     middle_json_path: Path | None = None,
     content_sha256: str = "",
     overrides: LayoutOverrides | None = None,
+    text_corrections: TextCorrections | None = None,
 ) -> Document:
     entries = _content_entries(read_json(content_list_path))
     primitive_blocks = _primitive_blocks(entries)
@@ -705,7 +708,10 @@ def build_document(
         for block in grouped_blocks
     ]
     overridden_blocks, override_count = apply_layout_overrides(grouped_blocks, overrides)
-    body_blocks, front_notes, endnotes = _extract_notes(overridden_blocks)
+    corrected_blocks, correction_count = apply_text_corrections(
+        overridden_blocks, text_corrections, target_blocks=grouped_blocks
+    )
+    body_blocks, front_notes, endnotes = _extract_notes(corrected_blocks)
     body_blocks, paragraph_merge_count = _merge_boundary_paragraphs(body_blocks)
 
     blocks, front_notes, endnotes, segments = _assign_segments(
@@ -732,6 +738,7 @@ def build_document(
             "automatic_paragraph_merges": paragraph_merge_count,
             "dropped_empty_blocks": empty_count,
             "overrides_applied": override_count,
+            "text_corrections_applied": correction_count,
             "override_targets": override_targets,
             **heading_info,
         },

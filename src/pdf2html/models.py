@@ -168,6 +168,21 @@ class LayoutOverrides(BaseModel):
     operations: list[LayoutOperation] = Field(default_factory=list)
 
 
+class TextCorrection(BaseModel):
+    target: LayoutTarget
+    field: Literal["source", "caption_source"]
+    value: str
+    reason: str
+
+
+class TextCorrections(BaseModel):
+    schema_version: Literal[1] = 1
+    job_id: str
+    source_sha256: str
+    content_sha256: str
+    corrections: list[TextCorrection] = Field(default_factory=list)
+
+
 class TranslationEntry(BaseModel):
     id: str
     role: str

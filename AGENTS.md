@@ -47,6 +47,8 @@
    `pixi run pdf2html layout --job <job-id>` 并检查刷新后的预览。不得削弱或绕过过期
    哈希、页码、bbox 或块指纹检查。将 `reclassify` 的目标设为 `heading` 时，必须
    包含经人工复核、范围为 1 至 6 的 `level`。
+   源 PDF 证实文本识别有误时，使用独立的 `text_corrections.json` 校正 `source` 或
+   `caption_source`；每项绑定 PDF、MinerU 与块指纹并记录核对原因。刷新布局后重新检查。
 5. 只有完成视觉检查后，才能运行
    `pixi run pdf2html finalize-layout --job <job-id>`。该操作会锁定已审阅布局并创建
    翻译任务。
@@ -59,6 +61,9 @@
    `pixi run pdf2html verify --job <job-id>`。
 10. 渲染有代表性的 PDF 页面，并在桌面宽度和 `1024 CSS px` 平板横屏宽度下检查最终
     页面。发现缺陷后必须修复并重新核验，才能报告完成。
+
+视觉检查使用项目的 `render-pdf` 和 `render-web` 命令；WSL 网页截图使用本地安装的
+Playwright Chromium。首次安装运行 `pixi run install-browser`。
 
 处理合集或标签时必须逐篇完成。一篇论文失败不得丢弃已经完成的任务；当记录的源哈希
 仍然一致时，应复用现有解析和翻译产物。

@@ -170,7 +170,7 @@ button { color: inherit; }
   margin: 0 0 1.6rem;
   scroll-margin-top: 90px;
 }
-.text-pair, .abstract, .heading-pair, figcaption, .table-caption, .figure-note {
+.text-pair, .abstract, .heading-pair, figcaption, .table-caption, .code-caption, .figure-note {
   display: grid;
   gap: .7rem;
 }
@@ -269,7 +269,7 @@ figure img, .table-fallback { display: block; max-width: 100%; height: auto; mar
   margin-top: .45rem;
   font: .86rem/1 Georgia, "Times New Roman", serif;
 }
-figcaption, .table-caption { margin-top: 1rem; font-weight: 600; }
+figcaption, .table-caption, .code-caption { margin-top: 1rem; font-weight: 600; }
 .figure-note { margin-top: .7rem; color: var(--muted); font-size: .86em; }
 .table-scroll { max-width: 100%; overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: .86em; }

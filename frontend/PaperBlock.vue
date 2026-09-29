@@ -149,6 +149,10 @@ const media = (asset: string) => {
   >
     <pre v-if="block.kind === 'code'"><code>{{ block.source }}</code></pre>
     <div v-else v-html="renderRich(block.source)" />
+    <div v-if="block.kind === 'code' && block.caption_source" class="code-caption pair">
+      <div class="target" lang="zh-CN" v-html="renderRich(captionTarget)" />
+      <div class="source" lang="en" v-html="renderRich(block.caption_source)" />
+    </div>
     <span class="page-marker">{{ pages }}</span>
   </section>
 
