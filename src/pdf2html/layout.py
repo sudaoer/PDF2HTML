@@ -157,6 +157,8 @@ def _group(blocks: list[DocumentBlock], operation: LayoutOperation) -> list[Docu
         raise LayoutOverrideError("Grouped figures must be on the same PDF page.")
     if any(len(block.bbox) != 4 for block in figures):
         raise LayoutOverrideError("Every grouped figure needs a four-value bbox.")
+    if operation.labels is not None and set(operation.labels) != set(target_ids):
+        raise LayoutOverrideError("group.labels must name every grouped target exactly once.")
     figures = _row_major_figures(figures)
     ids = [block.id for block in figures]
     if operation.caption_from not in target_ids:
@@ -168,6 +170,13 @@ def _group(blocks: list[DocumentBlock], operation: LayoutOperation) -> list[Docu
     members: list[FigureMember] = []
     for block in figures:
         label, _ = _caption_parts(block)
+        if operation.labels is not None:
+            explicit_label = operation.labels[block.id]
+            if label and label != explicit_label:
+                raise LayoutOverrideError(
+                    f"group.labels for {block.id} conflicts with its caption label."
+                )
+            label = explicit_label
         if not label or not block.asset:
             raise LayoutOverrideError("Every grouped figure needs an asset and subfigure label.")
         members.append(

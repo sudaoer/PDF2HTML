@@ -585,13 +585,17 @@ def test_mineru_v2_pages_are_flattened(tmp_path: Path) -> None:
     assert document.blocks[2].source == "- [1] Reference"
 
 
-def test_mineru_v2_code_preserves_body_and_caption(tmp_path: Path) -> None:
+@pytest.mark.parametrize("kind", ["code", "algorithm"])
+def test_mineru_v2_code_preserves_body_and_caption(tmp_path: Path, kind: str) -> None:
+    code = "if (ready) {\n    return value;\n}"
+    caption = "Listing 2: Security checks."
     payload = [[{
-        "type": "code",
+        "type": kind,
         "content": {
-            "code_content": [{"type": "text", "content": "int value = 1;"}],
-            "code_caption": [{"type": "text", "content": "Fig. 4: Allocation strategy."}],
+            f"{kind}_content": [{"type": "text", "content": code}],
+            f"{kind}_caption": [{"type": "text", "content": caption}],
         },
+        "bbox": [1, 2, 3, 4],
     }]]
     path = tmp_path / "paper_content_list_v2.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -602,10 +606,34 @@ def test_mineru_v2_code_preserves_body_and_caption(tmp_path: Path) -> None:
         source=source_reference(),
         content_list_path=path,
     )
-    assert document.blocks[0].kind == "code"
-    assert document.blocks[0].source == "int value = 1;"
-    assert document.blocks[0].caption_source == "Fig. 4: Allocation strategy."
-    assert any(segment.id == "b0001.caption" for segment in document.segments)
+    block = document.blocks[0]
+    assert block.kind == "code"
+    assert block.source == code
+    assert block.caption_source == caption
+    assert block.bbox == [1, 2, 3, 4]
+    assert not block.segment_id
+    assert block.caption_segment_id == "b0001.caption"
+
+    task_dir = tmp_path / "tasks"
+    translation_dir = tmp_path / "translations"
+    task_paths = write_translation_tasks(document, task_dir)
+    task = TranslationFile.model_validate(read_json(task_paths[0]))
+    assert {entry.id for entry in task.translations} == {"meta.title", "b0001.caption"}
+    caption_entry = next(entry for entry in task.translations if entry.id == "b0001.caption")
+    assert caption_entry.source == caption
+    assert caption_entry.source_hash == hash_text(caption)
+    fill_tasks(task_dir, translation_dir)
+    result = build_bundle(
+        document,
+        load_translations(document, translation_dir),
+        content_list_path=path,
+        library_root=tmp_path / "library",
+    )
+    assert verify_bundle(result.bundle_path)["status"] == "passed"
+    for language in ("en", "zh-CN"):
+        markdown = (result.paper_dir / f"paper.{language}.md").read_text(encoding="utf-8")
+        assert f"```text\n{code}\n```" in markdown
+        assert (caption if language == "en" else f"译文：{caption}") in markdown
 
 
 def test_list_item_markers_are_canonicalized_without_changing_content(

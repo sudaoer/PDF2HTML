@@ -9,6 +9,65 @@ describe("safe rendering", () => {
     expect(output).not.toContain("<script>");
   });
 
+  it("renders plain author superscripts and body subscripts", () => {
+    const container = document.createElement("div");
+    container.innerHTML = renderRich(
+      "Yuzhe Liu<sup>†∗</sup>, Zhijie Liu<sup>‡∗</sup>, " +
+        "Zhanyong Tang<sup>§⋄✉</sup>; output o<sub>i</sub> and R<sup>&dagger;</sup>.",
+    );
+
+    expect([...container.querySelectorAll("sup")].map((node) => node.textContent)).toEqual([
+      "†∗",
+      "‡∗",
+      "§⋄✉",
+      "†",
+    ]);
+    expect(container.querySelector("sub")?.textContent).toBe("i");
+    expect(container.textContent).not.toContain("<sup>");
+    expect(container.textContent).not.toContain("<sub>");
+  });
+
+  it("combines plain superscripts and subscripts with math", () => {
+    const container = document.createElement("div");
+    container.innerHTML = renderRich("o<sub>i</sub>, $o_i$, and x<sup>$2$</sup>.");
+
+    expect(container.querySelector("sub")?.textContent).toBe("i");
+    expect(container.querySelectorAll(".katex")).toHaveLength(2);
+    expect(container.querySelector("sup .katex")).not.toBeNull();
+    expect(container.querySelector(".katex-error")).toBeNull();
+  });
+
+  it("keeps attributed, mismatched, and unrelated HTML as text", () => {
+    const container = document.createElement("div");
+    const source =
+      '<sup onclick="alert(1)">†</sup> <sub style="color:red">i</sub> ' +
+      '<sup>x</sub> <sup>unclosed <img src="x" onerror="alert(2)"> ' +
+      '<script>alert(3)</script> <sup><img src="x"></sup>';
+    container.innerHTML = renderRich(source);
+
+    expect(container.querySelector("sup, sub, img, script, [onclick], [style]")).toBeNull();
+    expect(container.textContent?.trim()).toBe(source);
+  });
+
+  it("preserves literal tags in inline and fenced code and escaped text", () => {
+    const container = document.createElement("div");
+    container.innerHTML = renderRich(
+      "`<sup>†∗</sup>` and `<sub>i</sub>`\n\n" +
+        "```html\n<sup>†∗</sup>\no<sub>i</sub>\n```\n\n" +
+        String.raw`\<sup>†</sup> and &lt;sub&gt;i&lt;/sub&gt;` +
+        "\n\n<sup>`</sup>`",
+    );
+
+    expect(container.querySelector("sup, sub")).toBeNull();
+    expect([...container.querySelectorAll("code")].map((node) => node.textContent)).toEqual([
+      "<sup>†∗</sup>",
+      "<sub>i</sub>",
+      "<sup>†∗</sup>\no<sub>i</sub>\n",
+      "</sup>",
+    ]);
+    expect(container.textContent).toContain("<sup>†</sup> and <sub>i</sub>");
+  });
+
   it("renders display equations", () => {
     expect(renderEquation(String.raw`E=mc^2\tag{1}`)).toContain("katex-display");
   });

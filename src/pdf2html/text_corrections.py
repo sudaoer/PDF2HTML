@@ -53,6 +53,7 @@ def apply_text_corrections(
         raise TextCorrectionError("Document block IDs are not unique before text corrections.")
     current = {block.id: block for block in blocks}
     seen: set[tuple[str, str]] = set()
+    resolved_ids: list[str] = []
     for correction in corrections.corrections:
         target = correction.target
         block = original.get(target.id)
@@ -62,11 +63,22 @@ def apply_text_corrections(
             raise TextCorrectionError(f"Text correction target {target.id} moved.")
         if block_fingerprint(block) != target.block_hash:
             raise TextCorrectionError(f"Text correction target {target.id} content changed.")
-        if target.id not in current:
+        destination = current.get(target.id)
+        if destination is None and correction.field == "caption_source":
+            groups = [
+                candidate
+                for candidate in blocks
+                if candidate.kind == "figure_group"
+                and candidate.extra.get("caption_origin_id") == target.id
+                and any(member.id == target.id for member in candidate.members)
+            ]
+            if len(groups) == 1:
+                destination = groups[0]
+        if destination is None:
             raise TextCorrectionError(
                 f"Text correction target {target.id} was removed by a layout override."
             )
-        key = (target.id, correction.field)
+        key = (destination.id, correction.field)
         if key in seen:
             raise TextCorrectionError(
                 f"Duplicate text correction for {target.id}.{correction.field}."
@@ -76,14 +88,15 @@ def apply_text_corrections(
             raise TextCorrectionError(
                 f"Text correction for {target.id}.{correction.field} needs a reason and value."
             )
-        if not getattr(current[target.id], correction.field).strip():
+        if not getattr(destination, correction.field).strip():
             raise TextCorrectionError(
                 f"Text correction for {target.id}.{correction.field} has no source text."
             )
+        resolved_ids.append(destination.id)
     result = [block.model_copy(deep=True) for block in blocks]
     by_id = {block.id: block for block in result}
-    for correction in corrections.corrections:
-        block = by_id[correction.target.id]
+    for correction, destination_id in zip(corrections.corrections, resolved_ids, strict=True):
+        block = by_id[destination_id]
         setattr(block, correction.field, correction.value.strip())
         block.extra["text_corrected"] = True
     return result, len(corrections.corrections)

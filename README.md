@@ -110,6 +110,8 @@ pixi run pdf2html layout --job <job-id>
 }
 ```
 
+若子图标签已嵌入图片、未出现在 MinerU 图注中，人工核对 PDF 后可为 `group` 添加 `"labels": {"<block-a>": "(a)", "<block-b>": "(b)"}`。映射必须覆盖全部且仅包含分组目标，标签按几何阅读顺序从 `(a)` 连续排列，并与已有图注标签一致；`caption_from` 仍指定总图注来源，不修改源图注。
+
 `move` 使用两个 target（移动块、锚点）以及 `before_id` 或 `after_id`；`reclassify` 使用一个 target 和受支持的 `kind`，改为 `heading` 时还必须提供 1–6 的 `level`；`drop` 使用一个 target 和必填原因。override 不能修改文本、图片路径、译文或 HTML，任何前置条件失配都会使整份文件失效。标题层级属于块指纹的一部分，因此刷新归一化规则后必须从最新报告复制 target。
 
 源 PDF 证实 MinerU 文本识别有误时，在作业目录创建 `text_corrections.json`，逐项校正块的 `source` 或 `caption_source`。它与结构性 override 分开管理；每项使用最新 `layout_report.json` 中的 `override_targets` 作为目标，且必须填写核对原因：
@@ -131,7 +133,7 @@ pixi run pdf2html layout --job <job-id>
 }
 ```
 
-修改后重新运行 `layout`、视觉审查和 `finalize-layout`。源文字变更会使对应译文失效，须补全新的翻译任务，再运行 `build` 与 `verify`；不得直接编辑 MinerU 输出或生成的论文 bundle。
+对人工分组的总图注进行校正时，仍以分组前 `caption_from` 块的前置条件绑定 `caption_source`，校正会应用到对应组合图的总图注。修改后重新运行 `layout`、视觉审查和 `finalize-layout`。源文字变更会使对应译文失效，须补全新的翻译任务，再运行 `build` 与 `verify`；不得直接编辑 MinerU 输出或生成的论文 bundle。
 
 预览通过后锁定结构并生成翻译任务：
 

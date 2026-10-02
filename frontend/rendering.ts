@@ -5,6 +5,20 @@ import MarkdownIt from "markdown-it";
 const markdown = new MarkdownIt({ html: false, linkify: false, typographer: false }).enable(
   "table",
 );
+markdown.inline.ruler.before("html_inline", "plain_sup_sub", (state, silent) => {
+  const match = /^<(sup|sub)>([^<>`\n]*)<\/\1>/.exec(
+    state.src.slice(state.pos, state.posMax),
+  );
+  if (!match) return false;
+  if (!silent) {
+    const [, tag, content] = match;
+    state.push(`${tag}_open`, tag, 1);
+    state.push("text", "", 0).content = markdown.utils.unescapeAll(content);
+    state.push(`${tag}_close`, tag, -1);
+  }
+  state.pos += match[0].length;
+  return true;
+});
 const mathPattern = /(\$\$([\s\S]*?)\$\$|\\\[([\s\S]*?)\\\]|\\\((.*?)\\\)|(?<!\\)\$([^$\n]+?)\$)/g;
 const tableSanitizeConfig = {
   ALLOWED_ATTR: ["colspan", "rowspan"],
