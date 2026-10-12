@@ -110,6 +110,40 @@ def test_corrected_table_is_the_translation_source(tmp_path: Path) -> None:
     assert corrected.segments[1].source_hash != initial.segments[1].source_hash
 
 
+@pytest.mark.parametrize("kind", ["figure", "table", "figure_group"])
+def test_missing_figure_or_table_caption_can_be_restored(kind: str) -> None:
+    block = _block().model_copy(update={"kind": kind, "caption_source": ""})
+    corrections = _corrections(block)
+    corrections.corrections[0].field = "caption_source"
+    corrections.corrections[0].value = "核对源 PDF 后补回的图表说明"
+
+    updated, count = apply_text_corrections([block], corrections)
+    assert count == 1
+    assert updated[0].caption_source == "核对源 PDF 后补回的图表说明"
+    assert block.caption_source == ""
+
+    stale = corrections.model_copy(deep=True)
+    stale.corrections[0].target.block_hash = "0" * 64
+    with pytest.raises(TextCorrectionError, match="content changed"):
+        apply_text_corrections([block], stale)
+
+
+@pytest.mark.parametrize("kind", ["paragraph", "figure", "table", "figure_group"])
+def test_missing_source_text_cannot_be_restored(kind: str) -> None:
+    block = _block().model_copy(update={"kind": kind, "source": ""})
+    with pytest.raises(TextCorrectionError, match="has no source text"):
+        apply_text_corrections([block], _corrections(block))
+
+
+@pytest.mark.parametrize("kind", ["paragraph", "code"])
+def test_missing_caption_cannot_be_restored_on_other_kinds(kind: str) -> None:
+    block = _block().model_copy(update={"kind": kind, "caption_source": ""})
+    corrections = _corrections(block)
+    corrections.corrections[0].field = "caption_source"
+    with pytest.raises(TextCorrectionError, match="has no source text"):
+        apply_text_corrections([block], corrections)
+
+
 def test_code_caption_is_present_in_layout_preview(tmp_path: Path) -> None:
     content = tmp_path / "content.json"
     atomic_write_json(

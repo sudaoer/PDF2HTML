@@ -88,7 +88,11 @@ def apply_text_corrections(
             raise TextCorrectionError(
                 f"Text correction for {target.id}.{correction.field} needs a reason and value."
             )
-        if not getattr(destination, correction.field).strip():
+        missing_caption = (
+            correction.field == "caption_source"
+            and destination.kind in {"figure", "table", "figure_group"}
+        )
+        if not getattr(destination, correction.field).strip() and not missing_caption:
             raise TextCorrectionError(
                 f"Text correction for {target.id}.{correction.field} has no source text."
             )
