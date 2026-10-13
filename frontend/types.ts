@@ -93,6 +93,7 @@ export interface ShelfPaper extends PaperMetadata {
   title_zh: string;
   href: string;
   bundle_revision: string;
+  added_at: string | null;
 }
 
 export interface ShelfError {

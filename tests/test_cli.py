@@ -74,15 +74,21 @@ def test_cli_build_verify_and_serve_share_external_library(
     assert verified.exit_code == 0, verified.output
     assert json.loads(verified.output)["status"] == "passed"
 
-    served_roots: list[Path] = []
+    served: list[tuple[Path, str, int]] = []
 
     def capture_run(application: object, *, host: str, port: int) -> None:
-        served_roots.append(application.state.registry.library_root)  # type: ignore[attr-defined]
+        library = application.state.registry.library_root  # type: ignore[attr-defined]
+        served.append((library, host, port))
 
     monkeypatch.setattr(cli.uvicorn, "run", capture_run)
-    served = runner.invoke(app, ["serve", "--port", "8876"])
-    assert served.exit_code == 0, served.output
-    assert served_roots == [(knowledge_root / "library").resolve()]
+    default_server = runner.invoke(app, ["serve"])
+    assert default_server.exit_code == 0, default_server.output
+    custom_server = runner.invoke(app, ["serve", "--host", "127.0.0.1", "--port", "8876"])
+    assert custom_server.exit_code == 0, custom_server.output
+    assert served == [
+        ((knowledge_root / "library").resolve(), "0.0.0.0", 8765),
+        ((knowledge_root / "library").resolve(), "127.0.0.1", 8876),
+    ]
 
 
 def test_cli_verify_rejects_bundle_from_another_configured_library(

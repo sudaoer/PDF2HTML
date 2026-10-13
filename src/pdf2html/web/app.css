@@ -39,6 +39,7 @@ body {
 a { color: var(--accent); text-underline-offset: .18em; }
 button, input { font: inherit; }
 button { color: inherit; }
+[lang|="en"] { font-family: "Times New Roman", serif; }
 
 .eyebrow {
   margin: 0 0 .8rem;
@@ -108,7 +109,7 @@ button { color: inherit; }
 .toc-panel nav { display: grid; gap: .75rem; }
 .toc-panel a { display: grid; color: var(--ink); line-height: 1.35; text-decoration: none; }
 .toc-panel a:hover { color: var(--accent); }
-.toc-panel small { color: var(--muted); font-family: Georgia, serif; }
+.toc-panel small { color: var(--muted); font-family: "Times New Roman", serif; }
 .toc-level-2 { padding-left: 0; }
 .toc-level-3 { padding-left: .75rem; }
 .toc-level-4 { padding-left: 1.35rem; }
@@ -125,6 +126,7 @@ button { color: inherit; }
   width: min(100%, 820px);
   margin: 0 auto;
   font-size: var(--reader-size);
+  font-family: "Times New Roman", "Segoe UI", "Noto Sans CJK SC", "Microsoft YaHei UI", sans-serif;
 }
 .paper-hero {
   margin-bottom: 2.25rem;
@@ -137,7 +139,7 @@ button { color: inherit; }
 .paper-hero > .eyebrow { margin-bottom: .55rem; }
 .paper-hero h1 {
   margin: 0;
-  font-family: "Noto Serif CJK SC", "Source Han Serif SC", SimSun, serif;
+  font-family: "Times New Roman", "Noto Serif CJK SC", "Source Han Serif SC", SimSun, serif;
   font-size: clamp(2.1rem, 4.1vw, 3.2rem);
   line-height: 1.15;
   letter-spacing: -.035em;
@@ -145,7 +147,7 @@ button { color: inherit; }
 .original-title {
   margin: .75rem 0 1rem;
   color: var(--source);
-  font: 1.08em/1.45 Georgia, "Times New Roman", serif;
+  font: 1.08em/1.45 "Times New Roman", serif;
 }
 .byline { margin: .75rem 0 0; font-weight: 650; }
 .paper-meta { display: flex; flex-wrap: wrap; gap: .45rem .9rem; margin: .75rem 0 0; }
@@ -162,35 +164,36 @@ button { color: inherit; }
   font-size: .8rem;
 }
 .paper-front-notes .pair { margin: 0; }
-.paper-front-notes .source { padding-top: .35rem; }
+.paper-front-notes .source { padding-top: 0; }
 .paper-front-notes sup, .paper-endnotes sup { margin-right: .25rem; font-weight: 700; }
 
 .pair, .source-only, figure, .table-block {
   position: relative;
-  margin: 0 0 1.6rem;
+  margin: 0 0 .8rem;
   scroll-margin-top: 90px;
 }
 .text-pair, .abstract, .heading-pair, figcaption, .table-caption, .code-caption, .figure-note {
   display: grid;
-  gap: .7rem;
+  gap: .25rem;
 }
 .pair > .target, .pair > .source { min-width: 0; }
 .pair > .target { color: var(--ink); }
 .pair > .source {
-  padding-top: .65rem;
+  padding-top: 0;
   color: var(--source);
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: "Times New Roman", serif;
   font-size: .93em;
 }
 .paper-body > * + *::before {
   content: "";
   position: absolute;
-  top: -.8rem;
+  top: -.4rem;
   right: 0;
   left: 0;
   border-top: 1px solid var(--line);
 }
-.pair p { margin: 0 0 .7rem; }
+.pair p { margin: 0 0 .35rem; }
+.pair p:last-child { margin-bottom: 0; }
 .abstract {
   margin-bottom: 3rem;
   padding: 1.6rem 1.8rem;
@@ -199,18 +202,18 @@ button { color: inherit; }
   background: var(--accent-soft);
 }
 .abstract h2 { margin: 0 0 .5rem; font-size: 1rem; letter-spacing: .12em; text-transform: uppercase; }
-.heading-pair { margin-top: 2rem; }
+.heading-pair { margin-top: 1.1rem; }
 .heading-pair h1, .heading-pair h2, .heading-pair h3,
 .heading-pair h4, .heading-pair h5, .heading-pair h6 { margin: 0; line-height: 1.25; }
-.heading-level-2 { margin-top: 3.8rem; }
-.heading-level-3 { margin-top: 2.6rem; }
-.heading-level-4, .heading-level-5, .heading-level-6 { margin-top: 2rem; }
+.heading-level-2 { margin-top: 2rem; }
+.heading-level-3 { margin-top: 1.5rem; }
+.heading-level-4, .heading-level-5, .heading-level-6 { margin-top: 1.1rem; }
 .heading-level-2 h2 { font-size: 1.75em; }
 .heading-level-3 h3 { font-size: 1.35em; }
 .heading-level-4 h4 { font-size: 1.15em; }
 .heading-level-5 h5 { font-size: 1.05em; }
 .heading-level-6 h6 { font-size: 1em; }
-.heading-pair .target { font-family: "Noto Serif CJK SC", "Source Han Serif SC", SimSun, serif; }
+.heading-pair .target { font-family: "Times New Roman", "Noto Serif CJK SC", "Source Han Serif SC", SimSun, serif; }
 .heading-pair .source { font-size: .82em; }
 
 .page-marker {
@@ -225,12 +228,12 @@ button { color: inherit; }
   opacity: .55;
 }
 figure, .table-block, .source-only {
-  margin-top: 2.5rem;
-  margin-bottom: 2.8rem;
-  padding: 1.1rem;
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  background: var(--surface);
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 .source-only.reference {
   margin: 0 0 .75rem;
@@ -238,7 +241,7 @@ figure, .table-block, .source-only {
   border: 0;
   border-radius: 0;
   background: transparent;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: "Times New Roman", serif;
   font-size: .9em;
   line-height: 1.55;
 }
@@ -253,7 +256,7 @@ figure, .table-block, .source-only {
 }
 .reference li + li { margin-top: .75rem; }
 .figure-open { display: block; width: 100%; padding: 0; border: 0; background: none; cursor: zoom-in; }
-figure img, .table-fallback { display: block; max-width: 100%; height: auto; margin: 0 auto; border-radius: 10px; }
+figure img, .table-fallback { display: block; max-width: 100%; height: auto; margin: 0 auto; }
 .figure-members {
   display: grid;
   grid-template-columns: repeat(var(--figure-columns), minmax(0, 1fr));
@@ -267,7 +270,7 @@ figure img, .table-fallback { display: block; max-width: 100%; height: auto; mar
 .subfigure-label {
   display: block;
   margin-top: .45rem;
-  font: .86rem/1 Georgia, "Times New Roman", serif;
+  font: .86rem/1 "Times New Roman", serif;
 }
 figcaption, .table-caption, .code-caption { margin-top: 1rem; font-weight: 600; }
 .figure-note { margin-top: .7rem; color: var(--muted); font-size: .86em; }
@@ -276,7 +279,8 @@ table { width: 100%; border-collapse: collapse; font-size: .86em; }
 th, td { padding: .55rem .65rem; border: 1px solid var(--line); text-align: left; vertical-align: top; }
 th { background: var(--accent-soft); }
 .table-fallback { margin-top: 1rem; opacity: .8; }
-pre { overflow-x: auto; padding: 1rem; border-radius: 10px; background: var(--paper); font-size: .8em; }
+pre { overflow-x: auto; padding: 0; background: transparent; font-size: .8em; }
+pre, code { font-family: ui-monospace, "Cascadia Mono", monospace; }
 .math-display {
   display: block;
   width: 100%;
@@ -328,7 +332,7 @@ math { font-family: "Cambria Math", "STIX Two Math", serif; }
   border-top: 2px solid var(--line);
 }
 .paper-endnotes h2 { font-size: 1.15rem; }
-.paper-endnotes h2 span { margin-left: .35rem; color: var(--muted); font: .85em Georgia, serif; }
+.paper-endnotes h2 span { margin-left: .35rem; color: var(--muted); font: .85em "Times New Roman", serif; }
 .endnote { margin-bottom: 1rem; font-size: .86em; }
 .endnote-page { display: inline-block; margin-top: .35rem; color: var(--muted); font-size: .72rem; }
 .endnote-ref { color: var(--accent); text-decoration: none; }
@@ -356,7 +360,7 @@ math { font-family: "Cambria Math", "STIX Two Math", serif; }
 .paper-card h2 a { color: var(--ink); text-decoration: none; }
 .paper-card h2 a:hover { color: var(--accent); }
 .paper-year, .card-publication { color: var(--accent); font-size: .82rem; font-weight: 700; }
-.card-original { color: var(--source); font: .9rem/1.45 Georgia, serif; }
+.card-original { color: var(--source); font: .9rem/1.45 "Times New Roman", serif; }
 .card-authors { color: var(--muted); font-size: .85rem; }
 .paper-card[hidden] { display: none; }
 

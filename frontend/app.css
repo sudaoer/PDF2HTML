@@ -9,3 +9,7 @@
 .search-hit { padding: 1.25rem 1.5rem; border: 1px solid var(--line); border-radius: 1rem; background: var(--surface); }
 .search-hit h2, .search-hit p { margin: .35rem 0; }
 .table-pair > .source { padding-top: 0; border-top: 0; color: var(--ink); font-size: 1em; }
+.shelf-controls { display: flex; align-items: stretch; flex-wrap: wrap; gap: .75rem; margin-top: 2rem; }
+.shelf-controls .search-box { flex: 1; min-width: 18rem; margin-top: 0; }
+.shelf-sort { display: grid; gap: .45rem; color: var(--muted); font-size: .8rem; font-weight: 700; }
+.shelf-sort select { padding: .9rem 1rem; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--ink); font: inherit; }

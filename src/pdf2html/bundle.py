@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .headings import is_front_matter_duplicate
 from .models import Document, Segment
+from .shelf import read_shelf_metadata, record_added_at
 from .util import atomic_write_bytes, canonical_json_bytes, slugify
 
 BUNDLE_SCHEMA_VERSION = 1
@@ -345,6 +346,7 @@ def build_bundle(
     library_root: Path,
 ) -> BundleBuildResult:
     paper_id = f"{slugify(document.metadata.title)}-{document.source.item_key.lower()}"
+    read_shelf_metadata(library_root, paper_id)
     paper_dir = library_root / "papers" / paper_id
     media, mapping, media_files = _document_media(document, content_list_path)
 
@@ -430,6 +432,7 @@ def build_bundle(
         canonical_json_bytes(bundle.model_dump(mode="json"), indent=2),
     )
     cleanup_legacy_library(library_root)
+    record_added_at(library_root, paper_id)
     return BundleBuildResult(
         paper_dir=paper_dir,
         bundle_path=bundle_path,

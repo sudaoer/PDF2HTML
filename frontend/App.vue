@@ -8,8 +8,11 @@ import type {
   ReaderMode,
   SearchResponse,
   SearchResult,
+  ShelfPaper,
   ShelfResponse,
 } from "./types";
+
+type ShelfSort = "added-desc" | "added-asc" | "date-desc" | "date-asc" | "title-asc" | "title-desc";
 
 function savedTheme(): string {
   try {
@@ -26,6 +29,7 @@ const error = ref("");
 const shelf = ref<ShelfResponse | null>(null);
 const bundle = ref<PaperBundle | null>(null);
 const query = ref("");
+const shelfSort = ref<ShelfSort>("added-desc");
 const matches = ref<string[] | null>(null);
 const searchResults = ref<SearchResult[]>([]);
 const mode = ref<ReaderMode>("bilingual");
@@ -43,10 +47,25 @@ const media = computed<Record<string, string>>(() =>
 );
 const visiblePapers = computed(() => {
   const papers = shelf.value?.papers ?? [];
-  if (matches.value === null) return papers;
-  const ids = new Set(matches.value);
-  return papers.filter((paper) => ids.has(paper.paper_id));
+  const ids = matches.value === null ? null : new Set(matches.value);
+  return papers.filter((paper) => !ids || ids.has(paper.paper_id)).sort(comparePapers);
 });
+
+function comparePapers(left: ShelfPaper, right: ShelfPaper): number {
+  const sort = shelfSort.value;
+  const direction = sort.endsWith("asc") ? 1 : -1;
+  let comparison: number;
+  if (sort.startsWith("title")) {
+    comparison = (left.title_zh || left.title).localeCompare(right.title_zh || right.title, "zh-CN");
+  } else {
+    const leftValue = sort.startsWith("added") ? left.added_at : left.date;
+    const rightValue = sort.startsWith("added") ? right.added_at : right.date;
+    if (!leftValue && rightValue) return 1;
+    if (leftValue && !rightValue) return -1;
+    comparison = (leftValue || "").localeCompare(rightValue || "");
+  }
+  return comparison * direction || left.paper_id.localeCompare(right.paper_id);
+}
 const visibleBlocks = computed(() => {
   const document = bundle.value?.document;
   if (!document) return [];
@@ -172,10 +191,23 @@ onBeforeUnmount(() => {
       <p class="eyebrow">Local bilingual library</p>
       <h1>双语论文书架</h1>
       <p>由 Zotero、MinerU 与 Codex 生成的本地流式阅读版本。</p>
-      <label class="search-box">
-        <span>搜索</span>
-        <input v-model="query" type="search" placeholder="标题、作者、年份、标签或正文">
-      </label>
+      <div class="shelf-controls">
+        <label class="search-box">
+          <span>搜索</span>
+          <input v-model="query" type="search" placeholder="标题、作者、年份、标签或正文">
+        </label>
+        <label class="shelf-sort">
+          <span>排序</span>
+          <select v-model="shelfSort">
+            <option value="added-desc">入库时间：从新到旧</option>
+            <option value="added-asc">入库时间：从旧到新</option>
+            <option value="date-desc">发表日期：从新到旧</option>
+            <option value="date-asc">发表日期：从旧到新</option>
+            <option value="title-asc">标题：升序</option>
+            <option value="title-desc">标题：降序</option>
+          </select>
+        </label>
+      </div>
     </header>
     <section v-if="query" class="search-results" aria-live="polite">
       <article v-for="result in searchResults" :key="`${result.paper_id}:${result.block_id}`" class="search-hit">
@@ -195,10 +227,10 @@ onBeforeUnmount(() => {
     <section class="paper-grid" aria-live="polite">
       <article v-for="paper in visiblePapers" :key="paper.paper_id" class="paper-card">
         <p class="paper-year">{{ paper.date }}</p>
-        <h2><a :href="paper.href">{{ paper.title_zh }}</a></h2>
+        <h2><a :href="paper.href" :lang="paper.title_zh ? 'zh-CN' : 'en'">{{ paper.title_zh || paper.title }}</a></h2>
         <p class="card-original" lang="en">{{ paper.title }}</p>
-        <p class="card-authors">{{ paper.creators.join(", ") }}</p>
-        <p v-if="paper.publication" class="card-publication">{{ paper.publication }}</p>
+        <p class="card-authors" lang="en">{{ paper.creators.join(", ") }}</p>
+        <p v-if="paper.publication" class="card-publication" lang="en">{{ paper.publication }}</p>
       </article>
       <article v-for="item in shelf.errors" :key="item.paper_id" class="paper-card broken-card">
         <p class="paper-year">损坏的 bundle</p>
@@ -251,9 +283,9 @@ onBeforeUnmount(() => {
             <p class="eyebrow">Bilingual paper · 双语论文</p>
             <h1 lang="zh-CN">{{ translations['meta.title'] }}</h1>
             <p class="original-title" lang="en">{{ bundle.document.metadata.title }}</p>
-            <p class="byline">{{ [...new Set(bundle.document.metadata.creators)].join(", ") }}</p>
+            <p class="byline" lang="en">{{ [...new Set(bundle.document.metadata.creators)].join(", ") }}</p>
             <dl class="paper-meta">
-              <div v-if="bundle.document.metadata.publication"><dt>来源</dt><dd>{{ bundle.document.metadata.publication }}</dd></div>
+              <div v-if="bundle.document.metadata.publication"><dt>来源</dt><dd lang="en">{{ bundle.document.metadata.publication }}</dd></div>
               <div v-if="bundle.document.metadata.date"><dt>日期</dt><dd>{{ bundle.document.metadata.date }}</dd></div>
               <div v-if="bundle.document.metadata.doi"><dt>DOI</dt><dd>{{ bundle.document.metadata.doi }}</dd></div>
             </dl>

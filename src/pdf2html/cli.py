@@ -725,16 +725,17 @@ def verify(
 def serve(
     port: Annotated[
         int,
-        typer.Option("--port", min=1, max=65535, help="Loopback HTTP port"),
+        typer.Option("--port", min=1, max=65535, help="HTTP 端口"),
     ] = 8765,
+    host: Annotated[str, typer.Option("--host", help="HTTP 监听地址")] = "0.0.0.0",
 ) -> None:
-    """Serve the read-only Vue library on 127.0.0.1."""
+    """在指定地址提供只读 Vue 论文库。"""
     try:
         application = create_app(library_root=resolve_library_root(_root()))
     except (ConfigurationError, OSError, ServerError, ValueError) as exc:
         typer.echo(f"ERROR: {exc}", err=True)
         raise typer.Exit(1) from exc
-    uvicorn.run(application, host="127.0.0.1", port=port)
+    uvicorn.run(application, host=host, port=port)
 
 
 @app.command()

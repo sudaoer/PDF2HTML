@@ -165,9 +165,13 @@ pixi run pdf2html verify --job <job-id>
 pixi run pdf2html status --job <job-id>
 ```
 
-`build` 只在 `<knowledge-root>/library/papers/<paper-id>/` 写入可重复生成的 Markdown
+`build` 在 `<knowledge-root>/library/papers/<paper-id>/` 写入可重复生成的 Markdown
 bundle：`paper.en.md`、`paper.zh-CN.md`、自包含的 `paper.json` 和内容寻址的
-`media/`。它不会在论文库目录生成 HTML。
+`media/`。它不会在论文库目录生成 HTML。首次成功构建还会在
+`<knowledge-root>/library/shelf/<paper-id>.json` 独立记录 UTC 入库时间 `added_at`，
+重建保留原值，不改变论文内容及其 revision。`source` 为 `built` 的记录来自首次构建；
+`git_archive` 来自首次 Git 归档时间，是历史论文入库时间的近似值。缺失记录的论文
+不推定入库时间。
 
 启动只读本地书架：
 
@@ -185,7 +189,11 @@ pixi run pdf2html render-web --url http://127.0.0.1:8765/papers/<paper-id>/ --ou
 
 `render-web` 使用当前系统的 Playwright 无头 Chromium。首次使用时运行 `pixi run install-browser` 下载对应系统的浏览器；WSL 内会使用 Linux 浏览器。`--selector` 只截取指定页面元素；省略它时截取视口，加入 `--full-page` 时截取整页。`--height` 设置视口高度。
 
-服务固定监听 `127.0.0.1`。打开 `http://127.0.0.1:8765/` 即可使用 Vue
+服务默认监听 `0.0.0.0`，本机打开 `http://127.0.0.1:8765/`，内网设备使用
+`http://<本机内网 IP>:8765/`。需要限定地址时使用 `--host`，例如
+`pixi run pdf2html serve --host 127.0.0.1 --port 8765`。书架支持按入库时间、发表日期
+及标题排序，默认最近入库在前；时间缺失项排在末尾。搜索过滤后的论文卡片使用同一
+排序方式，搜索命中条目按相关性排列。服务只读取论文和书架元数据，提供 Vue
 书架、双语阅读器和中英文全文搜索。Markdown、sidecar 和媒体也可通过每篇论文的
 `/papers/<paper-id>/` 路由读取；服务只允许 `paper.json` 与 Vite manifest 中列出的
 文件，不提供任意文件系统访问。

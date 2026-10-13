@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,9 +11,8 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from .bundle import PaperBundle, bundle_shelf_record
 from .bundle_verify import BundleVerificationError, verify_bundle
 from .search import ENGLISH_WORD, SearchIndex
+from .shelf import PAPER_ID_PATTERN, ShelfMetadata, read_shelf_metadata
 from .util import canonical_json_bytes, hash_file, read_json
-
-PAPER_ID_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,126}[a-z0-9])?$")
 
 
 class ServerError(RuntimeError):
@@ -69,6 +67,8 @@ class BundleRegistry:
         self.papers_root = self.library_root / "papers"
         self.entries: dict[str, BundleEntry] = {}
         self.broken: dict[str, BrokenBundle] = {}
+        self.shelf_metadata: dict[str, ShelfMetadata | None] = {}
+        self.shelf_errors: dict[str, str] = {}
         self.search_index = SearchIndex()
         self.lock = threading.RLock()
         self.library_revision = "sha256:" + "0" * 64
@@ -119,6 +119,13 @@ class BundleRegistry:
                     digest=digest,
                 )
                 self.entries.pop(paper_id, None)
+        self.shelf_metadata = {}
+        self.shelf_errors = {}
+        for paper_id in self.entries:
+            try:
+                self.shelf_metadata[paper_id] = read_shelf_metadata(self.library_root, paper_id)
+            except (OSError, ValueError) as exc:
+                self.shelf_errors[paper_id] = str(exc)
         revision_payload = {
             "papers": sorted(
                 (paper_id, entry.bundle.bundle_revision)
@@ -127,6 +134,11 @@ class BundleRegistry:
             "errors": sorted(
                 (paper_id, item.digest, item.message) for paper_id, item in self.broken.items()
             ),
+            "shelf": sorted(
+                (paper_id, metadata.model_dump(mode="json") if metadata else None)
+                for paper_id, metadata in self.shelf_metadata.items()
+            ),
+            "shelf_errors": sorted(self.shelf_errors.items()),
         }
         import hashlib
 
@@ -149,6 +161,8 @@ class BundleRegistry:
             paper_id = str(record["paper_id"])
             record["href"] = f"/papers/{paper_id}/"
             record["bundle_revision"] = self.entries[paper_id].bundle.bundle_revision
+            metadata = self.shelf_metadata.get(paper_id)
+            record["added_at"] = metadata.added_at if metadata else None
         return {
             "schema_version": 1,
             "library_revision": self.library_revision,
@@ -260,6 +274,11 @@ def create_app(
     @app.get("/api/shelf")
     def shelf(request: Request) -> Response:
         state = refresh()
+        if state.shelf_errors:
+            return JSONResponse(
+                status_code=500,
+                content={"code": "invalid_shelf_metadata", "message": str(state.shelf_errors)},
+            )
         content = canonical_json_bytes(state.shelf_payload())
         return _bytes_response(
             request,
