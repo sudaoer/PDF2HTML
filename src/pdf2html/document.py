@@ -5,7 +5,12 @@ from pathlib import Path
 from typing import Any, cast
 
 from .headings import is_front_matter_duplicate, normalize_heading_structure
-from .layout import SUBFIGURE_PREFIX, apply_layout_overrides, block_fingerprint
+from .layout import (
+    SUBFIGURE_PREFIX,
+    LayoutOverrideError,
+    apply_layout_overrides,
+    block_fingerprint,
+)
 from .models import (
     Document,
     DocumentBlock,
@@ -20,7 +25,7 @@ from .models import (
     TranslationFile,
 )
 from .text_corrections import apply_text_corrections
-from .util import atomic_write_json, hash_text, read_json
+from .util import atomic_write_json, hash_file, hash_text, read_json
 
 PROTECTED_PATTERNS = [
     re.compile(r"\$\$.*?\$\$", re.DOTALL),
@@ -679,7 +684,15 @@ def build_document(
     content_sha256: str = "",
     overrides: LayoutOverrides | None = None,
     text_corrections: TextCorrections | None = None,
+    source_pdf: Path | None = None,
 ) -> Document:
+    if overrides is not None and any(
+        operation.source_crop is not None for operation in overrides.operations
+    ):
+        if overrides.source_sha256 != source.sha256:
+            raise LayoutOverrideError("source_crop source_sha256 does not match the document.")
+        if overrides.content_sha256 != hash_file(content_list_path):
+            raise LayoutOverrideError("source_crop content_sha256 no longer matches MinerU output.")
     entries = _content_entries(read_json(content_list_path))
     primitive_blocks = _primitive_blocks(entries)
     primitive_blocks, keyword_group_count = _group_keyword_blocks(primitive_blocks)
@@ -708,7 +721,9 @@ def build_document(
         }
         for block in grouped_blocks
     ]
-    overridden_blocks, override_count = apply_layout_overrides(grouped_blocks, overrides)
+    overridden_blocks, override_count = apply_layout_overrides(
+        grouped_blocks, overrides, source_pdf=source_pdf, asset_root=content_list_path.parent
+    )
     corrected_blocks, correction_count = apply_text_corrections(
         overridden_blocks, text_corrections, target_blocks=grouped_blocks
     )

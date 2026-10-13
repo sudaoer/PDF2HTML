@@ -14,7 +14,7 @@ from pydantic import ValidationError
 from .bundle import BundleError, build_bundle
 from .config import ConfigurationError, resolve_library_root
 from .document import build_document, write_document
-from .layout import LayoutOverrideError, load_layout_overrides
+from .layout import LayoutOverrideError, ensure_source_crop_media, load_layout_overrides
 from .mineru_runner import (
     MinerUError,
     executable_path,
@@ -171,6 +171,7 @@ def _write_layout(manifest: JobManifest) -> dict[str, Any]:
             content_sha256=content_hash,
             overrides=overrides,
             text_corrections=corrections,
+            source_pdf=_job_dir(manifest.job_id) / "source.pdf",
         )
     except (LayoutOverrideError, TextCorrectionError) as exc:
         override_errors.append(str(exc))
@@ -181,6 +182,7 @@ def _write_layout(manifest: JobManifest) -> dict[str, Any]:
             content_list_path=content_path,
             middle_json_path=middle_path,
             content_sha256=content_hash,
+            source_pdf=_job_dir(manifest.job_id) / "source.pdf",
         )
     document.layout_info.update(
         {
@@ -261,6 +263,35 @@ def _load_finalized_document(manifest: JobManifest) -> Document:
             f"The finalized document belongs to {document.job_id}, not {manifest.job_id}."
         )
     return document
+
+
+def _ensure_source_crops(manifest: JobManifest, document: Document) -> None:
+    layout_path = _root() / manifest.layout_document_path
+    if (
+        layout_path.is_file() and manifest.layout_document_hash
+        and hash_file(layout_path) != manifest.layout_document_hash
+    ):
+        raise ValueError("The reviewed layout document changed; run layout again.")
+    layout_payload = read_json(layout_path) if layout_path.is_file() else {}
+    job_uses_crops = any(
+        isinstance(block, dict)
+        and isinstance(block.get("extra"), dict)
+        and block["extra"].get("source_crop") is not None
+        for block in layout_payload.get("blocks", [])
+    )
+    if not job_uses_crops and not any(
+        block.extra.get("source_crop") is not None for block in document.blocks
+    ):
+        return
+    reviewed, _ = _assert_current_layout(manifest)
+    if document.model_dump(mode="json") != reviewed.model_dump(mode="json"):
+        raise LayoutOverrideError("source_crop document does not match the reviewed layout.")
+    ensure_source_crop_media(
+        document.blocks,
+        source_pdf=_job_dir(manifest.job_id) / "source.pdf",
+        asset_root=(_root() / manifest.mineru.content_list_path).parent,
+        source_sha256=manifest.source.sha256,
+    )
 
 
 def _manifest_bundle_path(manifest: JobManifest) -> tuple[Path, str]:
@@ -628,6 +659,7 @@ def build_command(
         translation_dir = _root() / manifest.translation_dir
         content_list_path = _root() / manifest.mineru.content_list_path
         document = _load_finalized_document(manifest)
+        _ensure_source_crops(manifest, document)
         translations = load_translations(document, translation_dir)
         bundle = build_bundle(
             document,
@@ -641,7 +673,9 @@ def build_command(
         manifest.error = ""
         _save_manifest(manifest)
         typer.echo(f"Built bundle {bundle.bundle_path} ({bundle.revision})")
-    except (BundleError, ValidationError, TranslationError, OSError, ValueError) as exc:
+    except (
+        BundleError, LayoutOverrideError, ValidationError, TranslationError, OSError, ValueError
+    ) as exc:
         typer.echo(f"ERROR: {exc}", err=True)
         raise typer.Exit(1) from exc
 
@@ -657,6 +691,8 @@ def verify(
             raise ValueError("Build the finalized paper before verification.")
         bundle_path, paper_id = _manifest_bundle_path(manifest)
         bundle_report = verify_bundle(bundle_path)
+        document = Document.model_validate(read_json(bundle_path)["document"])
+        _ensure_source_crops(manifest, document)
         http_report = verify_http_app(
             library_root=resolve_library_root(_root()),
             paper_id=paper_id,
@@ -675,6 +711,7 @@ def verify(
         typer.echo(json.dumps(report, ensure_ascii=False, indent=2))
     except (
         BundleVerificationError,
+        LayoutOverrideError,
         ValidationError,
         OSError,
         ServerError,

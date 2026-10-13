@@ -156,6 +156,7 @@ class LayoutOperation(BaseModel):
     after_id: str = ""
     caption_from: str = ""
     labels: dict[str, str] | None = None
+    source_crop: list[float] | None = None
     layout: Literal["auto", "row", "column", "grid"] = "auto"
     kind: str = ""
     level: int | None = None

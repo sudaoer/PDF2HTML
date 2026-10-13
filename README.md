@@ -114,6 +114,20 @@ pixi run pdf2html layout --job <job-id>
 
 `move` 使用两个 target（移动块、锚点）以及 `before_id` 或 `after_id`；`reclassify` 使用一个 target 和受支持的 `kind`，改为 `heading` 时还必须提供 1–6 的 `level`；`drop` 使用一个 target 和必填原因。override 不能修改文本、图片路径、译文或 HTML，任何前置条件失配都会使整份文件失效。标题层级属于块指纹的一部分，因此刷新归一化规则后必须从最新报告复制 target。
 
+当同一张图被拆成多个资产，而真实子图标签并不对应这些资产时，可在 `group` 中增加
+`"source_crop": [90, 85, 910, 545]`。四个数为源 PDF 页面的归一化坐标
+`[x0, y0, x1, y1]`，左上角为原点，各轴范围为 `0..1000`。必须对照源 PDF 确认裁剪范围
+保留完整图内标签且不纳入总图注；范围必须有效、有限，并包含所有 target 的 bbox。
+所有 target 仍须为同页图块，逐字保留当前报告中的页码、bbox 和块指纹，`caption_from`
+必须指向其中具有完整图注的块。`source_crop` 不能与 `labels` 混用，也不能用于其他操作。
+
+此分组会生成一个普通 `figure`。工具只读取作业中的 `source.pdf`，核对 SHA-256 后使用
+`pdftoppm` 以 150 DPI 渲染该页并裁剪，保留源图真实标签。派生 PNG 使用内容哈希命名，写入
+content list 同目录下独立的 `pdf2html-crops/`，不覆盖 MinerU 文件。图块记录源哈希、裁剪范围、
+原始块和图注来源。`text_corrections.json` 仍使用原 `caption_from` 块的前置条件校正总图注。
+CLI 的 `build` 和 `verify` 会对照已审阅文档与源 PDF 重现裁图；缺失媒体可以重建，已有媒体
+内容失配则失败。离线 bundle 核验继续只依赖 bundle 本身。
+
 源 PDF 证实 MinerU 文本识别有误时，在作业目录创建 `text_corrections.json`，逐项校正块的 `source` 或 `caption_source`。它与结构性 override 分开管理；每项使用最新 `layout_report.json` 中的 `override_targets` 作为目标，且必须填写核对原因：
 
 ```json

@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+import tempfile
+from io import BytesIO
+from math import ceil, floor, isfinite
 from pathlib import Path
 
+from PIL import Image
 from pydantic import ValidationError
 
 from .models import (
@@ -12,7 +17,8 @@ from .models import (
     LayoutOperation,
     LayoutOverrides,
 )
-from .util import hash_text, read_json
+from .screenshot import ScreenshotError, render_pdf_page
+from .util import hash_file, hash_text, read_json
 
 SUBFIGURE_PREFIX = re.compile(r"^\s*(\([a-z]\))\s*", re.IGNORECASE)
 ALLOWED_RECLASSIFICATIONS = {
@@ -138,7 +144,97 @@ def _row_major_figures(figures: list[DocumentBlock]) -> list[DocumentBlock]:
     ]
 
 
-def _group(blocks: list[DocumentBlock], operation: LayoutOperation) -> list[DocumentBlock]:
+def _crop_bbox(value: list[float]) -> list[float]:
+    if (
+        len(value) != 4
+        or any(not isfinite(coordinate) or not 0 <= coordinate <= 1000 for coordinate in value)
+        or value[0] >= value[2]
+        or value[1] >= value[3]
+    ):
+        raise LayoutOverrideError("source_crop needs a valid finite bbox within 0..1000.")
+    return value
+
+
+def _render_source_crop(
+    source_pdf: Path | None,
+    asset_root: Path | None,
+    *,
+    source_sha256: str,
+    page: int,
+    bbox: list[float],
+) -> str:
+    _crop_bbox(bbox)
+    if source_pdf is None or asset_root is None:
+        raise LayoutOverrideError("source_crop requires the copied source PDF and media root.")
+    if not source_pdf.is_file() or hash_file(source_pdf) != source_sha256:
+        raise LayoutOverrideError("source_crop source PDF SHA-256 changed or the PDF is missing.")
+    try:
+        with tempfile.TemporaryDirectory(prefix="pdf2html-crop-") as temporary:
+            rendered = render_pdf_page(source_pdf, Path(temporary) / "page.png", page=page + 1)
+            with Image.open(rendered) as image:
+                pixels = (
+                    floor(bbox[0] * image.width / 1000),
+                    floor(bbox[1] * image.height / 1000),
+                    ceil(bbox[2] * image.width / 1000),
+                    ceil(bbox[3] * image.height / 1000),
+                )
+                buffer = BytesIO()
+                image.crop(pixels).save(buffer, format="PNG")
+                content = buffer.getvalue()
+    except (ScreenshotError, OSError) as exc:
+        raise LayoutOverrideError(f"Cannot render source_crop: {exc}") from exc
+    if hash_file(source_pdf) != source_sha256:
+        raise LayoutOverrideError("source_crop source PDF SHA-256 changed during rendering.")
+    digest = hashlib.sha256(content).hexdigest()
+    asset = f"pdf2html-crops/{digest}.png"
+    destination = asset_root / asset
+    try:
+        destination.resolve().relative_to(asset_root.resolve())
+    except ValueError as exc:
+        raise LayoutOverrideError("source_crop derived media escapes its media root.") from exc
+    if destination.exists():
+        if not destination.is_file() or hash_file(destination) != digest:
+            raise LayoutOverrideError("source_crop derived media content changed.")
+    else:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(dir=destination.parent, delete=False) as staged:
+            staged.write(content)
+            staged_path = Path(staged.name)
+        try:
+            staged_path.replace(destination)
+        finally:
+            staged_path.unlink(missing_ok=True)
+    return asset
+
+
+def ensure_source_crop_media(
+    blocks: list[DocumentBlock],
+    *,
+    source_pdf: Path,
+    asset_root: Path,
+    source_sha256: str,
+) -> None:
+    for block in blocks:
+        crop = block.extra.get("source_crop")
+        if crop is None:
+            continue
+        if block.extra.get("source_crop_sha256") != source_sha256:
+            raise LayoutOverrideError("source_crop recorded source PDF SHA-256 changed.")
+        asset = _render_source_crop(
+            source_pdf, asset_root, source_sha256=source_sha256, page=block.page, bbox=crop
+        )
+        if asset != block.asset:
+            raise LayoutOverrideError("source_crop media no longer matches the reviewed crop.")
+
+
+def _group(
+    blocks: list[DocumentBlock],
+    operation: LayoutOperation,
+    *,
+    source_pdf: Path | None = None,
+    asset_root: Path | None = None,
+    source_sha256: str = "",
+) -> list[DocumentBlock]:
     target_ids = [target.id for target in operation.targets]
     if len(target_ids) < 2 or len(set(target_ids)) != len(target_ids):
         raise LayoutOverrideError("A group operation requires at least two unique targets.")
@@ -167,6 +263,37 @@ def _group(blocks: list[DocumentBlock], operation: LayoutOperation) -> list[Docu
     _, caption = _caption_parts(caption_block)
     if not caption:
         raise LayoutOverrideError("The selected caption source has no group caption.")
+    if operation.source_crop is not None:
+        if operation.labels is not None:
+            raise LayoutOverrideError("source_crop cannot be combined with group.labels.")
+        crop = _crop_bbox(operation.source_crop)
+        for block in figures:
+            bounds = _crop_bbox(block.bbox)
+            if not (
+                crop[0] <= bounds[0] and crop[1] <= bounds[1]
+                and crop[2] >= bounds[2] and crop[3] >= bounds[3]
+            ):
+                raise LayoutOverrideError("source_crop must contain every target bbox.")
+            if not block.asset:
+                raise LayoutOverrideError("Every source_crop target needs a figure asset.")
+        asset = _render_source_crop(
+            source_pdf, asset_root, source_sha256=source_sha256,
+            page=figures[0].page, bbox=crop,
+        )
+        cropped = DocumentBlock(
+            id=f"fg-{'-'.join(ids)}", kind="figure", page=figures[0].page,
+            asset=asset, caption_source=caption, footnote_source=caption_block.footnote_source,
+            bbox=crop,
+            extra={
+                "mineru_type": "source_pdf_crop", "caption_origin_id": caption_block.id,
+                "origin_block_ids": ids, "source_crop": crop,
+                "source_crop_sha256": source_sha256, "override": True,
+            },
+        )
+        remaining = [block for block in blocks if block.id not in target_ids]
+        first_index = min(index for index, block in enumerate(blocks) if block.id in target_ids)
+        remaining.insert(first_index, cropped)
+        return remaining
     members: list[FigureMember] = []
     for block in figures:
         label, _ = _caption_parts(block)
@@ -272,7 +399,8 @@ def _drop(blocks: list[DocumentBlock], operation: LayoutOperation) -> list[Docum
 
 
 def apply_layout_overrides(
-    blocks: list[DocumentBlock], overrides: LayoutOverrides | None
+    blocks: list[DocumentBlock], overrides: LayoutOverrides | None,
+    *, source_pdf: Path | None = None, asset_root: Path | None = None,
 ) -> tuple[list[DocumentBlock], int]:
     if overrides is None:
         return blocks, 0
@@ -281,6 +409,8 @@ def apply_layout_overrides(
     if len(by_id) != len(original):
         raise LayoutOverrideError("Document block IDs are not unique before overrides.")
     for operation in overrides.operations:
+        if operation.source_crop is not None and operation.op != "group":
+            raise LayoutOverrideError("source_crop is only supported for group operations.")
         if not operation.reason.strip() or not operation.targets:
             raise LayoutOverrideError(f"{operation.op} requires targets and a reason.")
         for index, target in enumerate(operation.targets):
@@ -292,7 +422,10 @@ def apply_layout_overrides(
     result = original
     for operation in overrides.operations:
         if operation.op == "group":
-            result = _group(result, operation)
+            result = _group(
+                result, operation, source_pdf=source_pdf, asset_root=asset_root,
+                source_sha256=overrides.source_sha256,
+            )
         elif operation.op == "move":
             result = _move(result, operation)
         elif operation.op == "reclassify":

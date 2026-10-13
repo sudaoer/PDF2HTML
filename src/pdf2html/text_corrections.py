@@ -68,9 +68,14 @@ def apply_text_corrections(
             groups = [
                 candidate
                 for candidate in blocks
-                if candidate.kind == "figure_group"
-                and candidate.extra.get("caption_origin_id") == target.id
-                and any(member.id == target.id for member in candidate.members)
+                if candidate.extra.get("caption_origin_id") == target.id
+                and (
+                    candidate.kind == "figure_group"
+                    and any(member.id == target.id for member in candidate.members)
+                    or candidate.kind == "figure"
+                    and candidate.extra.get("source_crop") is not None
+                    and target.id in candidate.extra.get("origin_block_ids", [])
+                )
             ]
             if len(groups) == 1:
                 destination = groups[0]
