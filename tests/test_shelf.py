@@ -57,6 +57,20 @@ def test_archive_time_is_utc_and_is_not_overwritten(tmp_path: Path) -> None:
     assert first.source == "git_archive"
 
 
+def test_rebuilding_legacy_bundle_keeps_unknown_added_at(tmp_path: Path) -> None:
+    document, content_path = prepared_document(tmp_path)
+    translations = {segment.id: f"译文：{segment.source}" for segment in document.segments}
+    library = tmp_path / "library"
+    bundle = build_bundle(
+        document, translations, content_list_path=content_path, library_root=library
+    )
+    metadata_path = library / "shelf" / f"{bundle.paper_id}.json"
+    metadata_path.unlink()
+    translations["meta.title"] = "路由网络"
+    build_bundle(document, translations, content_list_path=content_path, library_root=library)
+    assert not metadata_path.exists()
+
+
 def test_shelf_time_updates_etag_without_changing_bundle_and_service_stays_read_only(
     tmp_path: Path,
 ) -> None:
