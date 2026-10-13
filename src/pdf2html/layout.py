@@ -236,7 +236,10 @@ def _group(
     source_sha256: str = "",
 ) -> list[DocumentBlock]:
     target_ids = [target.id for target in operation.targets]
-    if len(target_ids) < 2 or len(set(target_ids)) != len(target_ids):
+    minimum_targets = 1 if operation.source_crop is not None else 2
+    if len(target_ids) < minimum_targets or len(set(target_ids)) != len(target_ids):
+        if operation.source_crop is not None:
+            raise LayoutOverrideError("A source_crop group requires at least one unique target.")
         raise LayoutOverrideError("A group operation requires at least two unique targets.")
     selected = [
         next((block for block in blocks if block.id == block_id), None)

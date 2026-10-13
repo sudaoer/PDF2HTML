@@ -310,6 +310,15 @@ pre, code { font-family: ui-monospace, "Cascadia Mono", monospace; }
   overflow: visible;
   contain: none;
 }
+.equation-scroll .katex-display > .katex > .katex-html {
+  width: max-content;
+  min-width: 100%;
+}
+.equation-scroll .katex-display > .katex > .katex-html > .tag {
+  position: static;
+  float: right;
+  margin-left: 1em;
+}
 .equation-number {
   position: absolute;
   inset-inline-end: 0;

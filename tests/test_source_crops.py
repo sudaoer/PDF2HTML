@@ -129,12 +129,28 @@ def _group(case: tuple[Path, Path, list[DocumentBlock], LayoutOverrides]) -> Doc
     return grouped[0]
 
 
+def _select_single_figure(
+    case: tuple[Path, Path, list[DocumentBlock], LayoutOverrides],
+) -> None:
+    _, content, figures, overrides = case
+    figures[:] = figures[-1:]
+    overrides.operations[0].targets = overrides.operations[0].targets[-1:]
+    entries = json.loads(content.read_text())
+    atomic_write_json(content, entries[-1:])
+    overrides.content_sha256 = hash_file(content)
+
+
+@pytest.mark.parametrize("single_target", [False, True])
 def test_source_crop_preserves_the_full_six_scene_pdf_image(
     crop_case: tuple[Path, Path, list[DocumentBlock], LayoutOverrides],
+    single_target: bool,
 ) -> None:
+    if single_target:
+        _select_single_figure(crop_case)
     source, content, figures, overrides = crop_case
     crop = _group(crop_case)
     assert crop.kind == "figure" and not crop.members
+    assert crop.id == f"fg-{'-'.join(block.id for block in figures)}"
     assert crop.extra["origin_block_ids"] == [block.id for block in figures]
     assert crop.extra["caption_origin_id"] == figures[-1].id
     assert crop.extra["source_crop_sha256"] == hash_file(source)
@@ -233,9 +249,61 @@ def test_source_crop_keeps_source_and_target_preconditions(
         _group(crop_case)
 
 
+@pytest.mark.parametrize(
+    "condition",
+    [
+        "empty-targets",
+        "duplicate-targets",
+        "ordinary-group",
+        "labels",
+        "caption-origin",
+        "missing-asset",
+        "non-figure",
+        "stale-page",
+        "stale-bbox",
+        "stale-target",
+    ],
+)
+def test_single_source_crop_keeps_group_and_target_preconditions(
+    crop_case: tuple[Path, Path, list[DocumentBlock], LayoutOverrides],
+    condition: str,
+) -> None:
+    _select_single_figure(crop_case)
+    _, _, figures, overrides = crop_case
+    op = overrides.operations[0]
+    if condition == "empty-targets":
+        op.targets = []
+    elif condition == "duplicate-targets":
+        op.targets.append(op.targets[0].model_copy(deep=True))
+    elif condition == "ordinary-group":
+        op.source_crop = None
+    elif condition == "labels":
+        op.labels = {figures[0].id: "(a)"}
+    elif condition == "caption-origin":
+        op.caption_from = "missing"
+    elif condition == "missing-asset":
+        figures[0].asset = ""
+        op.targets[0].block_hash = block_fingerprint(figures[0])
+    elif condition == "non-figure":
+        figures[0].kind = "paragraph"
+        op.targets[0].block_hash = block_fingerprint(figures[0])
+    elif condition == "stale-page":
+        op.targets[0].page = 1
+    elif condition == "stale-bbox":
+        op.targets[0].bbox = [0, 0, 1000, 1000]
+    else:
+        op.targets[0].block_hash = "0" * 64
+    with pytest.raises(LayoutOverrideError):
+        _group(crop_case)
+
+
+@pytest.mark.parametrize("single_target", [False, True])
 def test_source_crop_rebuilds_missing_media_and_rejects_changed_media(
     crop_case: tuple[Path, Path, list[DocumentBlock], LayoutOverrides],
+    single_target: bool,
 ) -> None:
+    if single_target:
+        _select_single_figure(crop_case)
     source, content, _, overrides = crop_case
     crop = _group(crop_case)
     asset = content.parent / crop.asset
@@ -277,9 +345,14 @@ def test_crop_temp_symlink_cannot_redirect_writes(
 
 
 @pytest.mark.parametrize("field", ["source_sha256", "content_sha256"])
+@pytest.mark.parametrize("single_target", [False, True])
 def test_crop_document_rejects_mismatched_source_and_content_hashes(
-    crop_case: tuple[Path, Path, list[DocumentBlock], LayoutOverrides], field: str
+    crop_case: tuple[Path, Path, list[DocumentBlock], LayoutOverrides],
+    field: str,
+    single_target: bool,
 ) -> None:
+    if single_target:
+        _select_single_figure(crop_case)
     source_pdf, content, _, overrides = crop_case
     source = SourceReference(
         library_prefix="users/0",
@@ -303,10 +376,14 @@ def test_crop_document_rejects_mismatched_source_and_content_hashes(
     assert not (content.parent / "pdf2html-crops").exists()
 
 
+@pytest.mark.parametrize("single_target", [False, True])
 def test_crop_document_caption_correction_preview_and_bundle(
     crop_case: tuple[Path, Path, list[DocumentBlock], LayoutOverrides],
     tmp_path: Path,
+    single_target: bool,
 ) -> None:
+    if single_target:
+        _select_single_figure(crop_case)
     source_pdf, content, _, overrides = crop_case
     source = SourceReference(
         library_prefix="users/0",

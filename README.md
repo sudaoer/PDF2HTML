@@ -115,7 +115,10 @@ pixi run pdf2html layout --job <job-id>
 `move` 使用两个 target（移动块、锚点）以及 `before_id` 或 `after_id`；`reclassify` 使用一个 target 和受支持的 `kind`，改为 `heading` 时还必须提供 1–6 的 `level`；`drop` 使用一个 target 和必填原因。override 不能修改文本、图片路径、译文或 HTML，任何前置条件失配都会使整份文件失效。标题层级属于块指纹的一部分，因此刷新归一化规则后必须从最新报告复制 target。
 
 当同一张图被拆成多个资产，而真实子图标签并不对应这些资产时，可在 `group` 中增加
-`"source_crop": [90, 85, 910, 545]`。四个数为源 PDF 页面的归一化坐标
+`"source_crop": [90, 85, 910, 545]`。如果单个图块的资产裁掉了图内列标题或标签，也可使用
+带 `source_crop` 的 `group` 修复：`targets` 只包含该图块，`caption_from` 指向同一图块，
+裁剪范围包含该块的完整 bbox 及源 PDF 中缺失的图内内容。普通 `group` 仍须至少两个目标。
+四个数为源 PDF 页面的归一化坐标
 `[x0, y0, x1, y1]`，左上角为原点，各轴范围为 `0..1000`。必须对照源 PDF 确认裁剪范围
 保留完整图内标签且不纳入总图注；范围必须有效、有限，并包含所有 target 的 bbox。
 所有 target 仍须为同页图块，逐字保留当前报告中的页码、bbox 和块指纹，`caption_from`
