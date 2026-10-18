@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 
+from markdown_it import MarkdownIt
 from pydantic import BaseModel, ConfigDict, Field
 
 from .headings import is_front_matter_duplicate
@@ -236,6 +237,16 @@ def render_bundle_markdown(
             language=language,
             translations=translations,
         )
+        if language == "en":
+            normalized = re.sub(r"(?<![ \t]) (?=\n)", "", abstract)
+            segment = segments.get("meta.abstract")
+            if normalized != abstract and (
+                segment is None or all(token in normalized for token in segment.protected)
+            ):
+                parser = MarkdownIt("commonmark", {"html": True, "linkify": False})
+                parser.enable("table")
+                if parser.render(normalized) == parser.render(abstract):
+                    abstract = normalized
         chunks.extend(
             (
                 '<a id="abstract"></a>\n',

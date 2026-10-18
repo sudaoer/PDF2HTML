@@ -6,7 +6,7 @@ from pathlib import Path, PurePosixPath
 import pytest
 from fastapi.testclient import TestClient
 
-from pdf2html.bundle import BundleError, PaperBundle, build_bundle
+from pdf2html.bundle import BundleError, PaperBundle, build_bundle, render_bundle_markdown
 from pdf2html.bundle_verify import BundleVerificationError, verify_bundle
 from pdf2html.document import build_document, write_document, write_translation_tasks
 from pdf2html.layout import LayoutOverrideError, apply_layout_overrides, block_fingerprint
@@ -140,6 +140,39 @@ def test_document_tasks_render_and_verify(tmp_path: Path) -> None:
     assert "译文：Routing Networks" in (
         result.paper_dir / "paper.zh-CN.md"
     ).read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("abstract", "expected"),
+    [
+        ("Abstract \n           Optical scanning.", "Abstract\n           Optical scanning."),
+        ("First line  \nSecond line.", "First line  \nSecond line."),
+        ("```text\nvalue \n```", "```text\nvalue \n```"),
+        ("A $x \n+y$ result.", "A $x \n+y$ result."),
+    ],
+)
+def test_english_abstract_serialization_preserves_source_and_semantics(
+    tmp_path: Path, abstract: str, expected: str
+) -> None:
+    original, content_path = prepared_document(tmp_path)
+    document = build_document(
+        job_id=original.job_id,
+        metadata=original.metadata.model_copy(update={"abstract": abstract}),
+        source=original.source,
+        content_list_path=content_path,
+    )
+    before = document.model_dump()
+    markdown = render_bundle_markdown(
+        document,
+        {},
+        language="en",
+        paper_id="paper",
+        revision="sha256:test",
+        document_sha256="a" * 64,
+        media_mapping={"images/figure.png": "media/figure.png"},
+    )
+    assert f"## Abstract\n\n{expected}\n\n" in markdown
+    assert document.model_dump() == before
 
 
 def test_markdown_bundle_is_deterministic_and_self_contained(tmp_path: Path) -> None:
