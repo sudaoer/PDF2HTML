@@ -93,7 +93,8 @@ def _rich_text(value: Any) -> str:
 def _image_path(content: dict[str, Any]) -> str:
     source = content.get("image_source")
     if isinstance(source, dict):
-        return _string(source.get("path"))
+        path = _string(source.get("path"))
+        return "" if path.endswith(("/", "\\")) else path
     return ""
 
 

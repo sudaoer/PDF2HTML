@@ -278,6 +278,7 @@ figcaption, .table-caption, .code-caption { margin-top: 1rem; font-weight: 600; 
 table { width: 100%; border-collapse: collapse; font-size: .86em; }
 th, td { padding: .55rem .65rem; border: 1px solid var(--line); text-align: left; vertical-align: top; }
 th { background: var(--accent-soft); }
+.table-scroll[lang="zh-CN"] th, .table-scroll[lang="zh-CN"] td { min-width: 6em; }
 .table-fallback { margin-top: 1rem; opacity: .8; }
 pre { overflow-x: auto; padding: 0; background: transparent; font-size: .8em; }
 pre, code { font-family: ui-monospace, "Cascadia Mono", monospace; }

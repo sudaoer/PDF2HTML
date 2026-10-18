@@ -657,6 +657,49 @@ def test_mineru_v2_pages_are_flattened(tmp_path: Path) -> None:
     assert document.blocks[2].source == "- [1] Reference"
 
 
+@pytest.mark.parametrize("image_path", ["", "images/", "images\\"])
+def test_mineru_v2_tables_without_image_assets_keep_html(
+    tmp_path: Path, image_path: str
+) -> None:
+    table_html = "<table><tr><td>Continued result</td><td>0.95</td></tr></table>"
+    payload = [
+        [{
+            "type": "table",
+            "content": {
+                "html": table_html,
+                "image_source": {"path": image_path},
+            },
+        }],
+        [{
+            "type": "table",
+            "content": {
+                "html": "",
+                "image_source": {"path": image_path},
+            },
+        }],
+    ]
+    path = tmp_path / "paper_content_list_v2.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    (tmp_path / "images").mkdir()
+    document = build_document(
+        job_id="v2-table-job",
+        metadata=PaperMetadata(title="V2 tables"),
+        source=source_reference(),
+        content_list_path=path,
+    )
+
+    assert [block.kind for block in document.blocks] == ["table", "table"]
+    assert [block.asset for block in document.blocks] == ["", ""]
+    assert [block.source for block in document.blocks] == [table_html, ""]
+    assert document.blocks[1].page == 1
+    preview = build_layout_preview(
+        document,
+        content_list_path=path,
+        preview_root=tmp_path / "preview",
+    )
+    assert table_html in preview.read_text(encoding="utf-8")
+
+
 @pytest.mark.parametrize("kind", ["code", "algorithm"])
 def test_mineru_v2_code_preserves_body_and_caption(tmp_path: Path, kind: str) -> None:
     code = "if (ready) {\n    return value;\n}"
