@@ -109,6 +109,35 @@ describe("table blocks", () => {
     expect(wrapper.find(".table-caption .target").text()).toBe("表 1：结果");
     expect(wrapper.find(".table-caption .source").text()).toBe("Table 1: Results");
   });
+
+  it.each(["bilingual", "target", "source"] as const)(
+    "preserves rich table footnotes in %s mode",
+    (mode) => {
+      const block = {
+        ...tableBlock(),
+        footnote_source: "Table 2: **Results** on $x^2$ [1].",
+        footnote_segment_id: "table-1.footnote",
+      };
+      const wrapper = mount(PaperBlock, {
+        props: {
+          block,
+          mode,
+          paperId: "paper",
+          translations: { [block.footnote_segment_id]: "表 2：$x^2$ 的**结果** [1]。" },
+          media: {},
+        },
+      });
+
+      const note = wrapper.find(".figure-note.pair");
+      expect(note.find(".target").attributes("lang")).toBe("zh-CN");
+      expect(note.find(".target").text()).toContain("表 2：");
+      expect(note.find(".target strong").text()).toBe("结果");
+      expect(note.find(".source").attributes("lang")).toBe("en");
+      expect(note.find(".source").text()).toContain("Table 2:");
+      expect(note.find(".source strong").text()).toBe("Results");
+      expect(note.findAll(".katex")).toHaveLength(2);
+    },
+  );
 });
 
 it("renders the reviewed caption below a code block", () => {

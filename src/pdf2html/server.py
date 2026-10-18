@@ -427,9 +427,11 @@ def verify_http_app(
     if not asset_names or client.get(f"/assets/{asset_names[0]}").status_code != 200:
         raise ServerError("Vue assets are not available through the HTTP service.")
     checks.append("assets")
-    query = ENGLISH_WORD.search(bundle.document.metadata.title)
-    if query is not None:
-        search = client.get("/api/search", params={"q": query.group(0), "limit": 10})
+    query = " ".join(ENGLISH_WORD.findall(bundle.document.metadata.title))
+    if len(query) > 200:
+        query = query[:201].rsplit(" ", 1)[0]
+    if query:
+        search = client.get("/api/search", params={"q": query, "limit": 10})
         if search.status_code != 200 or paper_id not in {
             item["paper_id"] for item in search.json()["results"]
         }:

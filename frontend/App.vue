@@ -85,9 +85,17 @@ const visibleBlocks = computed(() => {
       index < introduction && block.kind === "paragraph" && /^Abstract\b/i.test(block.source),
   );
   if (!document.metadata.abstract && abstract < 0) return bodyBlocks;
+  const section = bodyBlocks.findIndex(
+    (block, index) =>
+      index < introduction && block.kind === "heading" &&
+      !["abstract", "summary", "article info", "article information", "keywords"].includes(
+        block.source.trim().toLowerCase(),
+      ),
+  );
   return [
     ...bodyBlocks.slice(0, introduction).filter((block, index) =>
         (!document.metadata.abstract && index >= abstract) ||
+        (section >= 0 && index >= section) ||
         String(block.extra.front_matter_role ?? "") === "keywords" ||
         (block.kind === "paragraph" && block.source.toLowerCase().includes("http")),
     ),

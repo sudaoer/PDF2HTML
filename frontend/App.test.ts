@@ -394,6 +394,64 @@ describe("application routes", () => {
     expect(wrapper.text()).not.toContain("ARTICLE INFO");
   });
 
+  it.each(["Introduction", "1. Introduction"])(
+    "保留 %s 前的独立章节并去除重复摘要",
+    async (introduction) => {
+      history.pushState({}, "", "/papers/context-paper/");
+      const block = (id: string, kind: string, source: string, level = 0, role = "") => ({
+        id, kind, source, level, page: 0, segment_id: "", asset: "",
+        caption_source: "", caption_segment_id: "", footnote_source: "",
+        footnote_segment_id: "", members: [], layout: "auto",
+        extra: role ? { front_matter_role: role } : {},
+      });
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({
+        schema_version: 1, bundle_revision: "sha256:context", paper_id: "context-paper",
+        job_id: "job", media: [],
+        translations: [{ id: "meta.abstract", source_hash: "a", target: "摘要内容。" }],
+        document: {
+          job_id: "job",
+          metadata: {
+            title: "Context paper", creators: [], date: "", publication: "", doi: "",
+            url: "", abstract: "Summary text.", tags: [],
+          },
+          segments: [], front_matter_notes: [], endnotes: [],
+          blocks: [
+            block("title", "heading", "Context paper", 1, "document_title"),
+            block("article-info", "heading", "ARTICLE INFO", 2),
+            block("summary", "heading", "Summary", 2),
+            block("summary-text", "paragraph", "Summary text."),
+            block("context", "heading", "Research in context", 2),
+            block("evidence", "heading", "Evidence before this study", 3),
+            block("evidence-text", "paragraph", "Prior evidence."),
+            block("value", "heading", "Added value of this study", 3),
+            block("value-text", "paragraph", "New contribution."),
+            block("implications", "heading", "Implications of all the available evidence", 3),
+            block("implications-text", "paragraph", "Clinical implications."),
+            block("intro", "heading", introduction, 2),
+          ],
+        },
+      })));
+      const wrapper = mount(App);
+      await flushPromises();
+
+      for (const id of [
+        "context", "evidence", "evidence-text", "value", "value-text",
+        "implications", "implications-text", "intro",
+      ]) {
+        expect(wrapper.find(`.paper-body #${id}`).exists()).toBe(true);
+      }
+      for (const id of ["title", "article-info", "summary", "summary-text"]) {
+        expect(wrapper.find(`.paper-body #${id}`).exists()).toBe(false);
+      }
+      expect(wrapper.findAll(".toc-panel a").map((entry) => entry.attributes("href"))).toEqual([
+        "#context", "#evidence", "#value", "#implications", "#intro",
+      ]);
+      expect(wrapper.findAll(".abstract .source").map((entry) => entry.text())).toEqual([
+        "AbstractSummary text.",
+      ]);
+    },
+  );
+
   it("renders HTTP search excerpts without interpreting markup", async () => {
     history.pushState({}, "", "/");
     vi.stubGlobal(

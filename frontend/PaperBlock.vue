@@ -126,6 +126,10 @@ const media = (asset: string) => {
         v-html="renderRich(tableContent, true)"
       />
     </div>
+    <div v-if="block.footnote_source" class="figure-note pair">
+      <div class="target" lang="zh-CN" v-html="renderRich(footnoteTarget)" />
+      <div class="source" lang="en" v-html="renderRich(block.footnote_source)" />
+    </div>
     <span class="page-marker">{{ pages }}</span>
   </section>
 

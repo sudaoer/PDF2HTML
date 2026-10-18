@@ -329,7 +329,7 @@ def _build_paper_page(
             for index, block in enumerate(stream_blocks)
             if block.kind == "heading"
             and re.sub(
-                r"^(?:\d+(?:\.\d+)*|[IVXLCDM]+\.)\s*", "", block.source
+                r"^(?:\d+(?:\.\d+)*\.?|[IVXLCDM]+\.)\s*", "", block.source
             ).strip().casefold()
             == "introduction"
         ),
@@ -345,6 +345,18 @@ def _build_paper_page(
             None,
         )
         if document.metadata.abstract or abstract_index is not None:
+            section_index = next(
+                (
+                    index
+                    for index, block in enumerate(stream_blocks[:introduction_index])
+                    if block.kind == "heading"
+                    and block.source.strip().casefold()
+                    not in {
+                        "abstract", "summary", "article info", "article information", "keywords"
+                    }
+                ),
+                introduction_index,
+            )
             useful_front_matter = [
                 block
                 for index, block in enumerate(stream_blocks[:introduction_index])
@@ -354,6 +366,7 @@ def _build_paper_page(
                         and abstract_index is not None
                         and index >= abstract_index
                     )
+                    or index >= section_index
                     or (block.kind == "paragraph" and "http" in block.source.casefold())
                 )
             ]

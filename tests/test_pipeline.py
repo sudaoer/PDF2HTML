@@ -29,7 +29,7 @@ from pdf2html.render import (
     render_markdown,
 )
 from pdf2html.search import SearchIndex, plain_text, search_tokens
-from pdf2html.server import create_app
+from pdf2html.server import create_app, verify_http_app
 from pdf2html.translations import (
     TranslationError,
     load_translations,
@@ -398,6 +398,45 @@ def test_read_only_http_routes_and_incremental_corruption(tmp_path: Path) -> Non
     shelf_after = client.get("/api/shelf").json()
     assert shelf_after["papers"] == []
     assert shelf_after["errors"][0]["paper_id"] == result.paper_id
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "A Multimodal Spinal Screening Framework",
+        "A Multimodal " + "anatomical " * 30 + "screening",
+    ],
+)
+def test_http_verifier_searches_distinctive_title_in_crowded_library(
+    tmp_path: Path, title: str,
+) -> None:
+    content_path = write_content_list(tmp_path)
+    library_root = tmp_path / "library"
+    paper_id = ""
+    for index, paper_title in enumerate(["A"] * 11 + [title]):
+        document = build_document(
+            job_id=f"screening-{index}",
+            metadata=PaperMetadata(title=paper_title),
+            source=source_reference().model_copy(update={"item_key": f"ABCD{index:04d}"}),
+            content_list_path=content_path,
+        )
+        paper_id = build_bundle(
+            document,
+            {segment.id: f"译文：{segment.source}" for segment in document.segments},
+            content_list_path=content_path,
+            library_root=library_root,
+        ).paper_id
+    web_root = write_test_web_root(tmp_path)
+    client = TestClient(create_app(library_root=library_root, web_root=web_root))
+    broad_results = client.get("/api/search", params={"q": "A", "limit": 10}).json()
+    assert len(broad_results["results"]) == 10
+    assert paper_id not in {item["paper_id"] for item in broad_results["results"]}
+
+    report = verify_http_app(
+        library_root=library_root, paper_id=paper_id, web_root=web_root,
+    )
+    assert report["status"] == "passed"
+    assert "search" in report["checks"]
 
 
 def test_bilingual_fts_tokens_weights_pages_and_limits(tmp_path: Path) -> None:
