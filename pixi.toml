@@ -4,6 +4,7 @@ channels = ["conda-forge"]
 name = "PDF2HTML"
 platforms = ["win-64", "linux-64"]
 version = "0.1.0"
+license = "MIT"
 
 [tasks]
 pdf2html = { cmd = "python -m pdf2html", env = { PYTHONPATH = "src" } }

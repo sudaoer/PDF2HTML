@@ -218,3 +218,9 @@ Markdown AST、受保护 token、公式、块/段落标记、图形组、媒体�
 并通过应用内 HTTP 请求验证 shelf、Markdown、JSON、media、assets、全文搜索与
 ETag/304。任何失效的 override 都会阻止布局锁定。此外，Codex 会将源 PDF 页面与
 Vue 阅读器进行对比，并在交付前分别以桌面宽度和 `1024 CSS px` 平板横屏宽度检查站点。
+
+## 许可
+
+本项目采用 [MIT 许可](LICENSE)。随前端分发的第三方代码和字体保留各自许可，
+详见 [第三方许可声明](THIRD_PARTY_NOTICES.md)。论文原文、译文和图片等用户处理的
+内容不属于本项目的 MIT 授权范围。
